@@ -414,65 +414,69 @@ class AppState(QObject):
         self._logfile_append_mode = False
 
     def restore_settings(self):
-        self.setRts(self.settings.value("RTS", _DEFAULTS.get("RTS", False), bool))
-        self.setDtr(self.settings.value("DTR", _DEFAULTS.get("DTR", True), bool))
-        self.setAutoReconnect(
-            self.settings.value(
-                "AutoReconnect", _DEFAULTS.get("AutoReconnect", False), bool
+        try:
+            self.setRts(self.settings.value("RTS", _DEFAULTS.get("RTS", False), bool))
+            self.setDtr(self.settings.value("DTR", _DEFAULTS.get("DTR", True), bool))
+            self.setAutoReconnect(
+                self.settings.value(
+                    "AutoReconnect", _DEFAULTS.get("AutoReconnect", False), bool
+                )
             )
-        )
-        self.setLineEnd(
-            self.settings.value("LineEnd", _DEFAULTS.get("AutoReconnect", "CR"), str)
-        )
-        self.setAutoReturn(
-            self.settings.value("AutoReturn", _DEFAULTS.get("AutoReturn", False), bool)
-        )
-        self.setModemProtocol(
-            self.settings.value(
-                "ModemProtocol", _DEFAULTS.get("ModemProtocol", "YModem"), str
+            self.setLineEnd(
+                self.settings.value("LineEnd", _DEFAULTS.get("AutoReconnect", "CR"), str)
             )
-        )
-        self.setHexOutput(
-            self.settings.value("HexOutput", _DEFAULTS.get("HexOutput", False), bool)
-        )
-        self.setLogToFile(
-            self.settings.value("LogToFile", _DEFAULTS.get("LogToFile", False), bool)
-        )
-        self.setBaudrate(
-            self.settings.value(
-                "Baudrate",
-                _DEFAULTS.get("Baudrate", QSerialPort.BaudRate.Baud115200.value),
-                int,
+            self.setAutoReturn(
+                self.settings.value("AutoReturn", _DEFAULTS.get("AutoReturn", False), bool)
             )
-        )
-        self.setDataBits(
-            self.settings.value(
-                "DataBits", _DEFAULTS.get("DataBits", QSerialPort.DataBits.Data8.value), int
+            self.setModemProtocol(
+                self.settings.value(
+                    "ModemProtocol", _DEFAULTS.get("ModemProtocol", "YModem"), str
+                )
             )
-        )
-        self.setFlowControl(
-            self.settings.value(
-                "FlowControl", _DEFAULTS.get("FlowControl", QSerialPort.FlowControl.NoFlowControl.value), int
+            self.setHexOutput(
+                self.settings.value("HexOutput", _DEFAULTS.get("HexOutput", False), bool)
             )
-        )
-        self.setStopBits(
-            self.settings.value(
-                "StopBits", _DEFAULTS.get("StopBits", QSerialPort.StopBits.OneStop.value), int
+            self.setLogToFile(
+                self.settings.value("LogToFile", _DEFAULTS.get("LogToFile", False), bool)
             )
-        )
-        self.setParity(
-            self.settings.value(
-                "Parity", _DEFAULTS.get("Parity", QSerialPort.Parity.NoParity.value), int
+            self.setBaudrate(
+                self.settings.value(
+                    "Baudrate",
+                    _DEFAULTS.get("Baudrate", QSerialPort.BaudRate.Baud115200.value),
+                    int,
+                )
             )
-        )
-        self.setOpenMode(
-            self.settings.value(
-                "OpenMode", _DEFAULTS.get("OpenMode", QSerialPort.OpenModeFlag.ReadWrite.value), int
+            self.setDataBits(
+                self.settings.value(
+                    "DataBits", _DEFAULTS.get("DataBits", QSerialPort.DataBits.Data8.value), int
+                )
             )
-        )
-        self.setLogfileAppendMode(
-            self.settings.value("LogfileAppendMode", _DEFAULTS.get("LogfileAppendMode", False), bool)
-        )
+            self.setFlowControl(
+                self.settings.value(
+                    "FlowControl", _DEFAULTS.get("FlowControl", QSerialPort.FlowControl.NoFlowControl.value), int
+                )
+            )
+            self.setStopBits(
+                self.settings.value(
+                    "StopBits", _DEFAULTS.get("StopBits", QSerialPort.StopBits.OneStop.value), int
+                )
+            )
+            self.setParity(
+                self.settings.value(
+                    "Parity", _DEFAULTS.get("Parity", QSerialPort.Parity.NoParity.value), int
+                )
+            )
+            self.setOpenMode(
+                self.settings.value(
+                    "OpenMode", _DEFAULTS.get("OpenMode", QSerialPort.OpenModeFlag.ReadWrite.value), int
+                )
+            )
+            self.setLogfileAppendMode(
+                self.settings.value("LogfileAppendMode", _DEFAULTS.get("LogfileAppendMode", False), bool)
+            )
+        except EOFError as e:
+            print("EOFError", e)
+            self.save_settings()
 
     def save_settings(self):
         self.settings.setValue("RTS", self.getRts())
