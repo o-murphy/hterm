@@ -36,6 +36,7 @@ from qtpy.QtCore import (
     QSettings,
     QTimer,
     Signal,
+    Property,
     QStringListModel,
 )
 from qtpy.QtSerialPort import QSerialPort, QSerialPortInfo
@@ -422,14 +423,70 @@ class ModemTransferManager(QObject):
         pass
 
 
+class AppState(QObject):
+    autoReconnectChanged = Signal(bool)
+    rtsChanged = Signal(bool)
+    dtrChanged = Signal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.settings = QSettings("o-murphy", "ymodterm")
+
+        self._auto_reconnect = False
+        self._rts = False
+        self._dtr = True
+
+    def restore_settings(self):
+        self.setRts(self.settings.value("RTS", _DEFAULTS.get("RTS", False), bool))
+        self.setDtr(self.settings.value("DTR", _DEFAULTS.get("DTR", True), bool))
+
+    def save_settings(self):
+        self.settings.setValue("RTS", self.getRts())
+        self.settings.setValue("DTR", self.getDtr())
+        self.settings.sync()
+
+    # --- AutoReconnect ---
+    def getAutoReconnect(self):
+        return self._auto_reconnect
+
+    def setAutoReconnect(self, value):
+        if self._auto_reconnect != value:
+            self._auto_reconnect = value
+            self.autoReconnectChanged.emit(value)
+
+    # --- RTS ---
+    def getRts(self) -> bool:
+        return self._rts
+
+    def setRts(self, value: bool):
+        if self._rts != value:
+            self._rts = value
+            self.rtsChanged.emit(value)
+
+    # --- DTR ---
+    def getDtr(self) -> bool:
+        return self._dtr
+
+    def setDtr(self, value: bool):
+        if self._dtr != value:
+            self._dtr = value
+            self.dtrChanged.emit(value)
+
+    rts = Property(bool, getRts, setRts, notify=rtsChanged)
+    dtr = Property(bool, getDtr, setDtr, notify=dtrChanged)
+
+
+
 class SerialManagerWidget(QWidget):
     REFRESH_INTERVAL_MS = 3000
 
     connection_state_changed = Signal(bool)
     data_received = Signal(bytes)
 
-    def __init__(self, parent=None):
+    def __init__(self, state: AppState, parent=None):
         super().__init__(parent)
+
+        self.state = state
 
         self.ports: dict[str, QSerialPortInfo] = {}
         self.port: Optional[QSerialPort] = None
@@ -447,15 +504,14 @@ class SerialManagerWidget(QWidget):
 
         self.connect_btn = QPushButton("Connect")
 
-        self._rts = QCheckBox("RTS")
-        self._rts.setChecked(False)
-
-        self._dtr = QCheckBox("DTR")
-        self._dtr.setChecked(True)
-
         self._auto_reconnect = QCheckBox("Auto Reconnect")
-        self._auto_reconnect.setChecked(False)
-        self._auto_reconnect.setDisabled(True)
+        self._rts = QCheckBox("RTS")
+        self._dtr = QCheckBox("DTR")
+
+        self._rts.setChecked(self.state.getRts())
+        self._dtr.setChecked(self.state.getDtr())
+
+        self._auto_reconnect.setChecked(self.state.getAutoReconnect())
 
         self._settings_btn = QPushButton("Show Settings")
 
@@ -463,7 +519,6 @@ class SerialManagerWidget(QWidget):
 
         self.hlt = QHBoxLayout()
         self.hlt.setContentsMargins(0, 0, 0, 0)
-        # self.hlt.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.hlt.addWidget(self.connect_btn)
         self.hlt.addWidget(self.label)
         self.hlt.addWidget(self.select)
@@ -484,20 +539,16 @@ class SerialManagerWidget(QWidget):
         self.connect_btn.clicked.connect(self.toggle_connect)
         self._settings_btn.clicked.connect(self.toggle_settings)
 
-        self._rts.stateChanged.connect(self._update_rts)
-        self._dtr.stateChanged.connect(self._update_dtr)
+        self._auto_reconnect.toggled.connect(self.state.setAutoReconnect)
+        self._rts.toggled.connect(self.state.setRts)
+        self._dtr.toggled.connect(self.state.setDtr)
+
+        self.state.rtsChanged.connect(self._update_rts)
+        self.state.dtrChanged.connect(self._update_dtr)
 
         # <<< Run timer on init
         self.refresh_timer.start(self.REFRESH_INTERVAL_MS)
         # >>>
-
-    @property
-    def rts(self):
-        return self._rts.isChecked()
-
-    @rts.setter
-    def rts(self, value):
-        self._rts.setChecked(value)
 
     @property
     def dtr(self):
@@ -665,7 +716,7 @@ class SelectLogFileWidget(QWidget):
     @property
     def logfile(self) -> tuple[str, str]:
         return self._logfile.text()
-    
+
     @logfile.setter
     def logfile(self, text):
         self._logfile.setText(text)
@@ -674,7 +725,7 @@ class SelectLogFileWidget(QWidget):
     def logfile_append_mode(self):
         # file_mode = "a" if self._append.isChecked() else "w"
         return self._logfile_append_mode.isChecked()
-    
+
     @logfile_append_mode.setter
     def logfile_append_mode(self, value):
         self._logfile_append_mode.setChecked(value)
@@ -1232,10 +1283,11 @@ class InputHistory(QListView):
 
 
 class CentralWidget(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, state: AppState, parent=None):
         super().__init__(parent)
 
-        self.serial_manager = SerialManagerWidget(self)
+        self.state = state
+        self.serial_manager = SerialManagerWidget(self.state, self)
 
         # Worker for file send
         self.modem_manager = None
@@ -1439,6 +1491,8 @@ class YModTermWindow(QMainWindow):
         super().__init__()
 
         self.settings = QSettings("o-murphy", "ymodterm")
+        self.state = AppState(self)
+        self.state.restore_settings()
 
         # 1. Configure the main window properties
         self.setWindowTitle("YModTerm")
@@ -1446,7 +1500,7 @@ class YModTermWindow(QMainWindow):
 
         # 2. Create a central widget and layout
         # QMainWindow requires a central widget to host other UI elements
-        central_widget = CentralWidget()
+        central_widget = CentralWidget(self.state)
         self.setCentralWidget(central_widget)
 
         self.restore_settings()
@@ -1456,8 +1510,6 @@ class YModTermWindow(QMainWindow):
 
         # Serial manager
         manager_w = central_widget.serial_manager
-        manager_w.rts = self.settings.value("RTS", _DEFAULTS.get("RTS", False), bool)
-        manager_w.dtr = self.settings.value("DTR", _DEFAULTS.get("DTR", True), bool)
         manager_w.auto_reconnect = self.settings.value(
             "AutoReconnect", _DEFAULTS.get("AutoReconnect", False), bool
         )
@@ -1526,8 +1578,6 @@ class YModTermWindow(QMainWindow):
         # Serial manager
         manager_w: SerialManagerWidget = central_widget.serial_manager
         self.settings.setValue("AutoReconnect", manager_w.auto_reconnect)
-        self.settings.setValue("RTS", manager_w.rts)
-        self.settings.setValue("DTR", manager_w.dtr)
 
         # Input
         input_w: InputWidget = central_widget.input_widget
@@ -1557,6 +1607,7 @@ class YModTermWindow(QMainWindow):
         self.settings.sync()
 
     def closeEvent(self, event):
+        self.state.save_settings()
         self.save_settings()
         super().closeEvent(event)
 
