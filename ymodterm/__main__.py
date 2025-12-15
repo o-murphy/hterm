@@ -392,7 +392,7 @@ class ModemTransferManager(QObject):
             self._finish_transfer(success)
 
         except Exception as e:
-            if "скасована" in str(e).lower() or "cancel" in str(e).lower():
+            if "canceled" in str(e).lower() or "cancel" in str(e).lower():
                 self.log.emit("⚠ Transfer canceled by user")
                 self._finish_transfer(False)
             else:
