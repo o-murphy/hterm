@@ -144,12 +144,12 @@ _DEFAULTS = {
     "HexOutput": False,
     "LogToFile": False,
     # Settings tab
-    "Baudrate": QSerialPort.BaudRate.Baud9600,
-    "DataBits": QSerialPort.DataBits.Data8,
-    "StopBits": QSerialPort.StopBits.OneStop,
-    "Parity": QSerialPort.Parity.NoParity,
-    "FlowControl": QSerialPort.FlowControl.NoFlowControl,
-    "OpenMode": QSerialPort.OpenModeFlag.ReadWrite,
+    "Baudrate": QSerialPort.BaudRate.Baud9600.value,
+    "DataBits": QSerialPort.DataBits.Data8.value,
+    "StopBits": QSerialPort.StopBits.OneStop.value,
+    "Parity": QSerialPort.Parity.NoParity.value,
+    "FlowControl": QSerialPort.FlowControl.NoFlowControl.value,
+    "OpenMode": QSerialPort.OpenModeFlag.ReadWrite.value,
     "DisplayCtrlChars": False,
     "ShowTimeStamp": False,
     "Logfile": (Path("~").expanduser() / ".ymodterm.log").as_posix(),
@@ -377,16 +377,21 @@ class ModemTransferManager(QObject):
 
 
 class AppState(QObject):
-    autoReconnectChanged = Signal(int)
-    rtsChanged = Signal(int)
-    dtrChanged = Signal(int)
+    autoReconnectChanged = Signal(bool)
+    rtsChanged = Signal(bool)
+    dtrChanged = Signal(bool)
     lineEndChanged = Signal(str)
-    autoReturnChanged = Signal(int)
+    autoReturnChanged = Signal(bool)
     modemProtocolChanged = Signal(str)
-    hexOutputChanged = Signal(int)
-    logToFileChanged = Signal(int)
+    hexOutputChanged = Signal(bool)
+    logToFileChanged = Signal(bool)
     baudrateChanged = Signal(int)
     dataBitsChanged = Signal(int)
+    flowControlChanged = Signal(int)
+    stopBitsChanged = Signal(int)
+    parityChanged = Signal(int)
+    openModeChanged = Signal(int)
+    logfileAppendModeChanged = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -400,22 +405,27 @@ class AppState(QObject):
         self._modem_protocol = "YModem"
         self._hex_output = False
         self._log_to_file = False
-        self._baudrate = QSerialPort.BaudRate.Baud115200
-        self._data_bits = QSerialPort.DataBits.Data8
+        self._baudrate = QSerialPort.BaudRate.Baud115200.value
+        self._data_bits = QSerialPort.DataBits.Data8.value
+        self._flow_ctrl = QSerialPort.FlowControl.NoFlowControl.value
+        self._stop_bits = QSerialPort.StopBits.OneStop.value
+        self._parity = QSerialPort.Parity.NoParity.value
+        self._open_mode = QSerialPort.OpenModeFlag.ReadWrite.value
+        self._logfile_append_mode = False
 
     def restore_settings(self):
-        self.setRts(self.settings.value("RTS", _DEFAULTS.get("RTS", False), int))
-        self.setDtr(self.settings.value("DTR", _DEFAULTS.get("DTR", True), int))
+        self.setRts(self.settings.value("RTS", _DEFAULTS.get("RTS", False), bool))
+        self.setDtr(self.settings.value("DTR", _DEFAULTS.get("DTR", True), bool))
         self.setAutoReconnect(
             self.settings.value(
-                "AutoReconnect", _DEFAULTS.get("AutoReconnect", False), int
+                "AutoReconnect", _DEFAULTS.get("AutoReconnect", False), bool
             )
         )
         self.setLineEnd(
             self.settings.value("LineEnd", _DEFAULTS.get("AutoReconnect", "CR"), str)
         )
         self.setAutoReturn(
-            self.settings.value("AutoReturn", _DEFAULTS.get("AutoReturn", False), int)
+            self.settings.value("AutoReturn", _DEFAULTS.get("AutoReturn", False), bool)
         )
         self.setModemProtocol(
             self.settings.value(
@@ -423,22 +433,45 @@ class AppState(QObject):
             )
         )
         self.setHexOutput(
-            self.settings.value("HexOutput", _DEFAULTS.get("HexOutput", False), int)
+            self.settings.value("HexOutput", _DEFAULTS.get("HexOutput", False), bool)
         )
         self.setLogToFile(
-            self.settings.value("LogToFile", _DEFAULTS.get("LogToFile", False), int)
+            self.settings.value("LogToFile", _DEFAULTS.get("LogToFile", False), bool)
         )
         self.setBaudrate(
             self.settings.value(
                 "Baudrate",
-                _DEFAULTS.get("Baudrate", QSerialPort.BaudRate.Baud115200),
+                _DEFAULTS.get("Baudrate", QSerialPort.BaudRate.Baud115200.value),
                 int,
             )
         )
         self.setDataBits(
             self.settings.value(
-                "DataBits", _DEFAULTS.get("DataBits", QSerialPort.DataBits.Data8), int
+                "DataBits", _DEFAULTS.get("DataBits", QSerialPort.DataBits.Data8.value), int
             )
+        )
+        self.setFlowControl(
+            self.settings.value(
+                "FlowControl", _DEFAULTS.get("FlowControl", QSerialPort.FlowControl.NoFlowControl.value), int
+            )
+        )
+        self.setStopBits(
+            self.settings.value(
+                "StopBits", _DEFAULTS.get("StopBits", QSerialPort.StopBits.OneStop.value), int
+            )
+        )
+        self.setParity(
+            self.settings.value(
+                "Parity", _DEFAULTS.get("Parity", QSerialPort.Parity.NoParity.value), int
+            )
+        )
+        self.setOpenMode(
+            self.settings.value(
+                "OpenMode", _DEFAULTS.get("OpenMode", QSerialPort.OpenModeFlag.ReadWrite.value), int
+            )
+        )
+        self.setLogfileAppendMode(
+            self.settings.value("LogfileAppendMode", _DEFAULTS.get("LogfileAppendMode", False), bool)
         )
 
     def save_settings(self):
@@ -446,38 +479,43 @@ class AppState(QObject):
         self.settings.setValue("DTR", self.getDtr())
         self.settings.setValue("AutoReconnect", self.getAutoReconnect())
         self.settings.setValue("LineEnd", self.getLineEnd())
-        self.settings.setValue("AutoReturnLineEnd", self.getAutoReturn())
+        self.settings.setValue("AutoReturn", self.getAutoReturn())
         self.settings.setValue("ModemProtocol", self.getModemProtocol())
         self.settings.setValue("HexOutput", self.getHexOutput())
         self.settings.setValue("LogToFile", self.getLogToFile())
         self.settings.setValue("Baudrate", self.getBaudrate())
         self.settings.setValue("DataBits", self.getDataBits())
+        self.settings.setValue("FlowControl", self.getFlowControl())
+        self.settings.setValue("StopBits", self.getStopBits())
+        self.settings.setValue("Parity", self.getParity())
+        self.settings.setValue("OpenMode", self.getOpenMode())
+        self.settings.setValue("LogfileAppendMode", self.getLogfileAppendMode())
 
         self.settings.sync()
 
     # --- AutoReconnect ---
-    def getAutoReconnect(self):
+    def getAutoReconnect(self) -> bool:
         return self._auto_reconnect
 
-    def setAutoReconnect(self, value):
+    def setAutoReconnect(self, value: bool):
         if self._auto_reconnect != value:
             self._auto_reconnect = value
             self.autoReconnectChanged.emit(value)
 
     # --- RTS ---
-    def getRts(self) -> int:
+    def getRts(self) -> bool:
         return self._rts
 
-    def setRts(self, value: int):
+    def setRts(self, value: bool):
         if self._rts != value:
             self._rts = value
             self.rtsChanged.emit(value)
 
     # --- DTR ---
-    def getDtr(self) -> int:
+    def getDtr(self) -> bool:
         return self._dtr
 
-    def setDtr(self, value: int):
+    def setDtr(self, value: bool):
         if self._dtr != value:
             self._dtr = value
             self.dtrChanged.emit(value)
@@ -492,10 +530,10 @@ class AppState(QObject):
             self.lineEndChanged.emit(value)
 
     # --- Auto Return ---
-    def getAutoReturn(self) -> int:
-        return self._dtr
+    def getAutoReturn(self) -> bool:
+        return self._auto_return
 
-    def setAutoReturn(self, value: int):
+    def setAutoReturn(self, value: bool):
         if self._auto_return != value:
             self._auto_return = value
             self.autoReturnChanged.emit(value)
@@ -510,19 +548,19 @@ class AppState(QObject):
             self.modemProtocolChanged.emit(value)
 
     # --- Hex Output ---
-    def getHexOutput(self) -> int:
+    def getHexOutput(self) -> bool:
         return self._hex_output
 
-    def setHexOutput(self, value: int):
+    def setHexOutput(self, value: bool):
         if self._hex_output != value:
             self._hex_output = value
             self.hexOutputChanged.emit(value)
 
     # --- Log To File ---
-    def getLogToFile(self) -> int:
+    def getLogToFile(self) -> bool:
         return self._log_to_file
 
-    def setLogToFile(self, value: int):
+    def setLogToFile(self, value: bool):
         if self._log_to_file != value:
             self._log_to_file = value
             self.logToFileChanged.emit(value)
@@ -536,7 +574,7 @@ class AppState(QObject):
             self._baudrate = value
             self.baudrateChanged.emit(value)
 
-    # --- DataBits ---
+    # --- Data Bits ---
     def getDataBits(self) -> int:
         return self._data_bits
 
@@ -544,6 +582,51 @@ class AppState(QObject):
         if self._data_bits != value:
             self._data_bits = value
             self.dataBitsChanged.emit(value)
+
+    # --- Flow Control ---
+    def getFlowControl(self) -> int:
+        return self._flow_ctrl
+
+    def setFlowControl(self, value: int):
+        if self._flow_ctrl != value:
+            self._flow_ctrl = value
+            self.flowControlChanged.emit(value)
+
+    # --- Stop Bits ---
+    def getStopBits(self) -> int:
+        return self._stop_bits
+
+    def setStopBits(self, value: int):
+        if self._stop_bits != value:
+            self._stop_bits = value
+            self.stopBitsChanged.emit(value)
+
+    # --- Parity ---
+    def getParity(self) -> int:
+        return self._parity
+
+    def setParity(self, value: int):
+        if self._parity != value:
+            self._parity = value
+            self.parityChanged.emit(value)
+
+    # --- Open Mode ---
+    def getOpenMode(self) -> int:
+        return self._open_mode
+
+    def setOpenMode(self, value: int):
+        if self._open_mode != value:
+            self._open_mode = value
+            self.openModeChanged.emit(value)
+
+    # --- Logfile Append Mode ---
+    def getLogfileAppendMode(self) -> bool:
+        return self._logfile_append_mode
+
+    def setLogfileAppendMode(self, value: bool):
+        if self._logfile_append_mode != value:
+            self._logfile_append_mode = value
+            self.logfileAppendModeChanged.emit(value)
 
     rts = Property(int, getRts, setRts, notify=rtsChanged)
     dtr = Property(int, getDtr, setDtr, notify=dtrChanged)
@@ -559,6 +642,11 @@ class AppState(QObject):
     log_to_file = Property(int, getLogToFile, setLogToFile, notify=logToFileChanged)
     baudrate = Property(int, getBaudrate, setBaudrate, notify=baudrateChanged)
     data_bits = Property(int, getDataBits, setDataBits, notify=dataBitsChanged)
+    flow_ctrl = Property(int, getFlowControl, setFlowControl, notify=flowControlChanged)
+    stop_bits = Property(int, getStopBits, setStopBits, notify=stopBitsChanged)
+    parity = Property(int, getParity, setParity, notify=parityChanged)
+    open_mode = Property(int, getOpenMode, setOpenMode, notify=openModeChanged)
+    logfile_append_mode = Property(int, getLogfileAppendMode, setLogfileAppendMode, notify=logfileAppendModeChanged)
 
 
 class SerialManagerWidget(QWidget):
@@ -723,14 +811,14 @@ class SerialManagerWidget(QWidget):
             # 2. Configure the port
             self.port.setPortName(port_name)
             self.port.setBaudRate(self.state.getBaudrate())
-            self.port.setDataBits(self.state.getDataBits())
-            self.port.setParity(self.settings.parity)
-            self.port.setStopBits(self.settings.stop_bits)
-            self.port.setFlowControl(self.settings.flow_ctrl)
+            self.port.setDataBits(QSerialPort.DataBits(self.state.getDataBits()))
+            self.port.setParity(QSerialPort.Parity(self.state.getParity()))
+            self.port.setStopBits(QSerialPort.StopBits(self.state.getStopBits()))
+            self.port.setFlowControl(QSerialPort.FlowControl(self.state.getFlowControl()))
 
             # 3. Attempt to open the port
             # if self.port.open(QIODevice.OpenModeFlag.ReadWrite):
-            if self.port.open(self.settings.open_mode):
+            if self.port.open(QSerialPort.OpenModeFlag(self.state.getOpenMode())):
                 self.connect_btn.setText("Disconnect")
                 self.setConfigutrationEnabled(False)
                 self.connection_state_changed.emit(True)
@@ -763,21 +851,27 @@ class SerialManagerWidget(QWidget):
 class SelectLogFileWidget(QWidget):
     logfile_changed = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, state: AppState, parent=None):
         super().__init__(parent)
+        self.state = state
 
         self._logfile = QLineEdit(self)
         self._logfile.setAlignment(Qt.AlignmentFlag.AlignRight)
         self._get_logfile = QPushButton("...")
         self._get_logfile.setFixedWidth(32)
-        self._logfile_append_mode = QCheckBox("Append")
+
+        self.logfile_append_mode = QCheckBox("Append")
+
+        self.logfile_append_mode.setChecked(self.state.getLogfileAppendMode())
+
+        self.logfile_append_mode.toggled.connect(self.state.setLogfileAppendMode)
 
         self.lt = QHBoxLayout(self)
         self.lt.setContentsMargins(0, 0, 0, 0)
         self.lt.addWidget(QLabel("Logfile:"))
         self.lt.addWidget(self._logfile)
         self.lt.addWidget(self._get_logfile)
-        self.lt.addWidget(self._logfile_append_mode)
+        self.lt.addWidget(self.logfile_append_mode)
 
         self._get_logfile.clicked.connect(self.on_get_log_file)
         self._logfile.textChanged.connect(self.logfile_changed.emit)
@@ -793,21 +887,12 @@ class SelectLogFileWidget(QWidget):
     def logfile(self, text):
         self._logfile.setText(text)
 
-    @property
-    def logfile_append_mode(self):
-        # file_mode = "a" if self._append.isChecked() else "w"
-        return self._logfile_append_mode.isChecked()
-
-    @logfile_append_mode.setter
-    def logfile_append_mode(self, value):
-        self._logfile_append_mode.setChecked(value)
-
     def on_get_log_file(self):
         file_dialog = QFileDialog(self, "Save log file ...")
         file_dialog.setAcceptMode(QFileDialog.AcceptSave)
         file_dialog.setFileMode(QFileDialog.FileMode.AnyFile)
         file_dialog.setOption(
-            QFileDialog.Option.DontConfirmOverwrite, self.logfile_append_mode
+            QFileDialog.Option.DontConfirmOverwrite, self.state.getLogfileAppendMode()
         )  # ⚡ вимикає стандартний попереджувальний діалог
         result = file_dialog.exec_()
         print(result)
@@ -826,64 +911,92 @@ class SettingsWidget(QWidget):
         self.state = state
 
         self.baudrate = QComboBox(self)
+        self.data_bits = QComboBox(self)
+        self.flow_ctrl = QComboBox(self)
+        self.stop_bits = QComboBox(self)
+        self.parity = QComboBox(self)
+        self.open_mode = QComboBox(self)
+
         self.baudrate.setEditable(True)
         baud_validator = QIntValidator(0, 10000000, self)
         self.baudrate.lineEdit().setValidator(baud_validator)
+
         self.baudrate.addItems(
-            [str(v) for v in QSerialPort.BaudRate.__members__.values()]
+            [str(v.value) for v in QSerialPort.BaudRate.__members__.values()]
         )
 
-        self.data_bits = QComboBox(self)
-        self.data_bits.addItems(
-            [str(v.value) for v in QSerialPort.DataBits.__members__.values()]
-        )
+        for k, v in QSerialPort.DataBits.__members__.items():
+            self.data_bits.addItem(str(v.value), v)
 
-        self.baudrate.setCurrentText(str(self.state.getBaudrate()))
-        self.data_bits.setCurrentText(str(self.state.getDataBits()))
-
-        self.baudrate.currentTextChanged.connect(
-            lambda v: self.state.setBaudrate(int(v))
-        )
-        self.data_bits.currentTextChanged.connect(
-            lambda v: self.state.setDataBits(int(v))
-        )
-
-        self._flow_ctrl = QComboBox(self)
         for k, v in {
             "None": QSerialPort.FlowControl.NoFlowControl,
             "Hardware": QSerialPort.FlowControl.HardwareControl,
             "Software": QSerialPort.FlowControl.SoftwareControl,
         }.items():
-            self._flow_ctrl.addItem(k.replace("Flow", ""), userData=v)
-        self._flow_ctrl.setCurrentIndex(
-            self._flow_ctrl.findData(QSerialPort.FlowControl.NoFlowControl)
-        )
+            self.flow_ctrl.addItem(k.replace("Flow", ""), userData=v)
 
-        self._parity = QComboBox(self)
-        for k, v in QSerialPort.Parity.__members__.items():
-            _name = str(v.name).replace("Parity", "").replace("No", "None")
-            self._parity.addItem(_name, userData=v)
-
-        self._open_mode = QComboBox(self)
-        for k, v in {
-            "Read Only": QSerialPort.OpenModeFlag.ReadOnly,
-            "WriteOnly": QSerialPort.OpenModeFlag.WriteOnly,
-            "Read/Write": QSerialPort.OpenModeFlag.ReadWrite,
-        }.items():
-            self._open_mode.addItem(k, userData=v)
-        self._open_mode.setCurrentIndex(
-            self._open_mode.findData(QSerialPort.OpenModeFlag.ReadWrite)
-        )
-
-        self._stop_bits = QComboBox(self)
         for k, v in {
             "One Stop": QSerialPort.StopBits.OneStop,
             "Two Stop": QSerialPort.StopBits.TwoStop,
             "One and Half": QSerialPort.StopBits.OneAndHalfStop,
         }.items():
-            self._stop_bits.addItem(k, userData=v)
-        self._stop_bits.setCurrentIndex(
-            self._stop_bits.findData(QSerialPort.StopBits.OneStop)
+            self.stop_bits.addItem(k, userData=v)
+
+        for k, v in QSerialPort.Parity.__members__.items():
+            _name = str(v.name).replace("Parity", "").replace("No", "None")
+            self.parity.addItem(_name, userData=v)
+
+        for k, v in {
+            "Read Only": QSerialPort.OpenModeFlag.ReadOnly,
+            "WriteOnly": QSerialPort.OpenModeFlag.WriteOnly,
+            "Read/Write": QSerialPort.OpenModeFlag.ReadWrite,
+        }.items():
+            self.open_mode.addItem(k, userData=v)
+
+        self.baudrate.setCurrentText(str(self.state.getBaudrate()))
+        self.data_bits.setCurrentIndex(
+            self.data_bits.findData(
+                QSerialPort.DataBits(self.state.getDataBits())
+            )
+        )
+        self.flow_ctrl.setCurrentIndex(
+            self.flow_ctrl.findData(
+                QSerialPort.FlowControl(self.state.getFlowControl())
+            )
+        )
+        self.stop_bits.setCurrentIndex(
+            self.stop_bits.findData(
+                QSerialPort.StopBits(self.state.getStopBits())
+            )
+        )
+        self.parity.setCurrentIndex(
+            self.parity.findData(
+                QSerialPort.Parity(self.state.getParity())
+            )
+        )
+        self.open_mode.setCurrentIndex(
+            self.open_mode.findData(
+                QSerialPort.OpenModeFlag(self.state.getOpenMode())
+            )
+        )
+
+        self.baudrate.currentTextChanged.connect(
+            lambda v: self.state.setBaudrate(int(v))
+        )
+        self.data_bits.currentIndexChanged.connect(
+            lambda v: self.state.setDataBits(self.data_bits.currentData().value)
+        )
+        self.flow_ctrl.currentIndexChanged.connect(
+            lambda v: self.state.setFlowControl(self.flow_ctrl.currentData().value)
+        )
+        self.stop_bits.currentIndexChanged.connect(
+            lambda v: self.state.setStopBits(self.stop_bits.currentData().value)
+        )
+        self.parity.currentIndexChanged.connect(
+            lambda v: self.state.setParity(self.parity.currentData().value)
+        )
+        self.open_mode.currentIndexChanged.connect(
+            lambda v: self.state.setOpenMode(self.open_mode.currentData().value)
         )
 
         self._display_ctrl_chars = QCheckBox("Display Ctrl Characters")
@@ -891,7 +1004,7 @@ class SettingsWidget(QWidget):
         self._show_timestamp = QCheckBox("Show Timestamp")
         self._show_timestamp.setDisabled(True)
 
-        self._logfile = SelectLogFileWidget(self)
+        self._logfile = SelectLogFileWidget(state, self)
 
         self.grid = QGridLayout()
         self.grid.setAlignment(Qt.AlignmentFlag.AlignLeft)
@@ -904,16 +1017,16 @@ class SettingsWidget(QWidget):
         self.grid.addWidget(self._display_ctrl_chars, 0, 4)
 
         self.grid.addWidget(QLabel("Flow Control"), 1, 0)
-        self.grid.addWidget(self._flow_ctrl, 1, 1)
+        self.grid.addWidget(self.flow_ctrl, 1, 1)
         self.grid.addWidget(QLabel("Parity"), 1, 2)
-        self.grid.addWidget(self._parity, 1, 3)
+        self.grid.addWidget(self.parity, 1, 3)
 
         self.grid.addWidget(self._show_timestamp, 1, 4)
 
         self.grid.addWidget(QLabel("Open Mode"), 2, 0)
-        self.grid.addWidget(self._open_mode, 2, 1)
+        self.grid.addWidget(self.open_mode, 2, 1)
         self.grid.addWidget(QLabel("Stop Bits"), 2, 2)
-        self.grid.addWidget(self._stop_bits, 2, 3)
+        self.grid.addWidget(self.stop_bits, 2, 3)
         self.grid.addWidget(self._logfile, 2, 4, 1, 2)
 
         self.vlt = QVBoxLayout(self)
@@ -929,38 +1042,6 @@ class SettingsWidget(QWidget):
 
     def toggle(self):
         self.setVisible(not self.isVisible())
-
-    @property
-    def parity(self):
-        return self._parity.currentData()
-
-    @parity.setter
-    def parity(self, value):
-        self._parity.setCurrentIndex(self._parity.findData(value))
-
-    @property
-    def stop_bits(self):
-        return self._stop_bits.currentData()
-
-    @stop_bits.setter
-    def stop_bits(self, value):
-        self._stop_bits.setCurrentIndex(self._stop_bits.findData(value))
-
-    @property
-    def open_mode(self):
-        return self._open_mode.currentData()
-
-    @open_mode.setter
-    def open_mode(self, value):
-        self._open_mode.setCurrentIndex(self._open_mode.findData(value))
-
-    @property
-    def flow_ctrl(self):
-        return self._flow_ctrl.currentData()
-
-    @flow_ctrl.setter
-    def flow_ctrl(self, value):
-        self._flow_ctrl.setCurrentIndex(self._flow_ctrl.findData(value))
 
     @property
     def display_ctrl_chars(self):
@@ -985,14 +1066,6 @@ class SettingsWidget(QWidget):
     @logfile.setter
     def logfile(self, text):
         self._logfile.logfile = text
-
-    @property
-    def log_file_append_mode(self):
-        return self._logfile._logfile_append_mode.isChecked()
-
-    @log_file_append_mode.setter
-    def log_file_append_mode(self, value):
-        return self._logfile._logfile_append_mode.setChecked(value)
 
 
 class TerminalInput(QLineEdit):
@@ -1363,12 +1436,15 @@ class CentralWidget(QWidget):
         self.on_connection_state_changed(False)  # force on init
 
     def on_connection_state_changed(self, state: bool):
+        stop_bits = self.state.getStopBits()
+        if stop_bits == 3:
+            stop_bits = "1.5"
         text = "Device: {port}\tConnection: {baud} @ {bits}-{parity}-{stop}".format(
             port=self.serial_manager.select.currentText(),
             baud=self.state.getBaudrate(),
             bits=self.state.getDataBits(),
-            parity=self.serial_manager.settings.parity.name[0],
-            stop=self.serial_manager.settings.stop_bits.value,
+            parity=QSerialPort.Parity(self.state.getDataBits()).name[0],
+            stop=stop_bits,
         )
         self.status.setText(text)
 
@@ -1534,22 +1610,6 @@ class YModTermWindow(QMainWindow):
 
         # Settings
         settings_w: SettingsWidget = central_widget.serial_manager.settings
-        settings_w.stop_bits = self.settings.value(
-            "StopBits", _DEFAULTS.get("StopBits", QSerialPort.StopBits.OneStop), int
-        )
-        settings_w.parity = self.settings.value(
-            "Parity", _DEFAULTS.get("Parity", QSerialPort.Parity.NoParity), int
-        )
-        settings_w.flow_ctrl = self.settings.value(
-            "FlowControl",
-            _DEFAULTS.get("FlowControl", QSerialPort.FlowControl.NoFlowControl),
-            int,
-        )
-        settings_w.open_mode = self.settings.value(
-            "OpenMode",
-            _DEFAULTS.get("OpenMode", QSerialPort.OpenModeFlag.ReadWrite),
-            int,
-        )
         settings_w.display_ctrl_chars = self.settings.value(
             "DisplayCtrlChars", _DEFAULTS.get("DisplayCtrlChars", False), bool
         )
@@ -1568,14 +1628,9 @@ class YModTermWindow(QMainWindow):
 
         # Settings
         settings_w: SettingsWidget = central_widget.serial_manager.settings
-        self.settings.setValue("StopBits", settings_w.stop_bits)
-        self.settings.setValue("Parity", settings_w.parity)
-        self.settings.setValue("FlowControl", settings_w.flow_ctrl)
-        self.settings.setValue("OpenMode", settings_w.open_mode)
         self.settings.setValue("DisplayCtrlChars", settings_w.display_ctrl_chars)
         self.settings.setValue("ShowTimeStamp", settings_w.show_timestamp)
         self.settings.setValue("Logfile", settings_w.logfile)
-        self.settings.setValue("LogfileAppendMode", settings_w.log_file_append_mode)
 
         # Apply QSettings
         self.settings.sync()
