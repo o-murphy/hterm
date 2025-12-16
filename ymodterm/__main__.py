@@ -392,7 +392,10 @@ class AppState(QObject):
     parityChanged = Signal(int)
     openModeChanged = Signal(int)
     logfileAppendModeChanged = Signal(bool)
-
+    displayCtrlCharsChanged = Signal(bool)
+    showTimestampChanged = Signal(bool)
+    logfileChanged = Signal(str)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.settings = QSettings("o-murphy", "ymodterm")
@@ -412,6 +415,9 @@ class AppState(QObject):
         self._parity = QSerialPort.Parity.NoParity.value
         self._open_mode = QSerialPort.OpenModeFlag.ReadWrite.value
         self._logfile_append_mode = False
+        self._display_ctrl_chars = False
+        self._show_timestamp = False
+        self._logfile = _DEFAULTS.get("LogToFile")
 
     def restore_settings(self):
         try:
@@ -423,10 +429,14 @@ class AppState(QObject):
                 )
             )
             self.setLineEnd(
-                self.settings.value("LineEnd", _DEFAULTS.get("AutoReconnect", "CR"), str)
+                self.settings.value(
+                    "LineEnd", _DEFAULTS.get("AutoReconnect", "CR"), str
+                )
             )
             self.setAutoReturn(
-                self.settings.value("AutoReturn", _DEFAULTS.get("AutoReturn", False), bool)
+                self.settings.value(
+                    "AutoReturn", _DEFAULTS.get("AutoReturn", False), bool
+                )
             )
             self.setModemProtocol(
                 self.settings.value(
@@ -434,10 +444,14 @@ class AppState(QObject):
                 )
             )
             self.setHexOutput(
-                self.settings.value("HexOutput", _DEFAULTS.get("HexOutput", False), bool)
+                self.settings.value(
+                    "HexOutput", _DEFAULTS.get("HexOutput", False), bool
+                )
             )
             self.setLogToFile(
-                self.settings.value("LogToFile", _DEFAULTS.get("LogToFile", False), bool)
+                self.settings.value(
+                    "LogToFile", _DEFAULTS.get("LogToFile", False), bool
+                )
             )
             self.setBaudrate(
                 self.settings.value(
@@ -448,32 +462,57 @@ class AppState(QObject):
             )
             self.setDataBits(
                 self.settings.value(
-                    "DataBits", _DEFAULTS.get("DataBits", QSerialPort.DataBits.Data8.value), int
+                    "DataBits",
+                    _DEFAULTS.get("DataBits", QSerialPort.DataBits.Data8.value),
+                    int,
                 )
             )
             self.setFlowControl(
                 self.settings.value(
-                    "FlowControl", _DEFAULTS.get("FlowControl", QSerialPort.FlowControl.NoFlowControl.value), int
+                    "FlowControl",
+                    _DEFAULTS.get(
+                        "FlowControl", QSerialPort.FlowControl.NoFlowControl.value
+                    ),
+                    int,
                 )
             )
             self.setStopBits(
                 self.settings.value(
-                    "StopBits", _DEFAULTS.get("StopBits", QSerialPort.StopBits.OneStop.value), int
+                    "StopBits",
+                    _DEFAULTS.get("StopBits", QSerialPort.StopBits.OneStop.value),
+                    int,
                 )
             )
             self.setParity(
                 self.settings.value(
-                    "Parity", _DEFAULTS.get("Parity", QSerialPort.Parity.NoParity.value), int
+                    "Parity",
+                    _DEFAULTS.get("Parity", QSerialPort.Parity.NoParity.value),
+                    int,
                 )
             )
             self.setOpenMode(
                 self.settings.value(
-                    "OpenMode", _DEFAULTS.get("OpenMode", QSerialPort.OpenModeFlag.ReadWrite.value), int
+                    "OpenMode",
+                    _DEFAULTS.get("OpenMode", QSerialPort.OpenModeFlag.ReadWrite.value),
+                    int,
                 )
             )
             self.setLogfileAppendMode(
-                self.settings.value("LogfileAppendMode", _DEFAULTS.get("LogfileAppendMode", False), bool)
+                self.settings.value(
+                    "LogfileAppendMode", _DEFAULTS.get("LogfileAppendMode", False), bool
+                )
             )
+            self.setDisplayCtrlChars(
+                self.settings.value(
+                    "DisplayCtrlChars", _DEFAULTS.get("DisplayCtrlChars", False), bool
+                )
+            )
+            self.setShowTimestamp(self.settings.value(
+                "ShowTimeStamp", _DEFAULTS.get("ShowTimeStamp", False), bool
+            ))
+            self.setLogfile(self.settings.value(
+                "Logfile", _DEFAULTS.get("Logfile", ""), str
+            ))
         except EOFError as e:
             print("EOFError", e)
             self.save_settings()
@@ -494,6 +533,9 @@ class AppState(QObject):
         self.settings.setValue("Parity", self.getParity())
         self.settings.setValue("OpenMode", self.getOpenMode())
         self.settings.setValue("LogfileAppendMode", self.getLogfileAppendMode())
+        self.settings.setValue("DisplayCtrlChars", self.getDisplayCtrlChars())
+        self.settings.setValue("ShowTimeStamp", self.getShowTimestamp())
+        self.settings.setValue("Logfile", self.getLogfile())
 
         self.settings.sync()
 
@@ -632,25 +674,63 @@ class AppState(QObject):
             self._logfile_append_mode = value
             self.logfileAppendModeChanged.emit(value)
 
-    rts = Property(int, getRts, setRts, notify=rtsChanged)
-    dtr = Property(int, getDtr, setDtr, notify=dtrChanged)
+    # --- Display Ctrl Chars Changed ---
+    def getDisplayCtrlChars(self) -> bool:
+        return self._display_ctrl_chars
+
+    def setDisplayCtrlChars(self, value: bool):
+        if self._display_ctrl_chars != value:
+            self._display_ctrl_chars = value
+            self.displayCtrlCharsChanged.emit(value)
+
+    # --- Show Timestamp ---
+    def getShowTimestamp(self) -> bool:
+        return self._show_timestamp
+
+    def setShowTimestamp(self, value: bool):
+        if self._show_timestamp != value:
+            self._show_timestamp = value
+            self.showTimestampChanged.emit(value)
+
+    # --- Logfile ---
+    def getLogfile(self) -> str:
+        return self._logfile
+
+    def setLogfile(self, value: str):
+        if self._logfile != value:
+            self._logfile = value
+            self.logfileChanged.emit(value)
+
+    rts = Property(bool, getRts, setRts, notify=rtsChanged)
+    dtr = Property(bool, getDtr, setDtr, notify=dtrChanged)
     auto_reconnect = Property(
-        int, getAutoReconnect, setAutoReconnect, notify=autoReconnectChanged
+        bool, getAutoReconnect, setAutoReconnect, notify=autoReconnectChanged
     )
     line_end = Property(str, getLineEnd, setLineEnd, notify=lineEndChanged)
-    auto_return = Property(int, getAutoReturn, setAutoReturn, notify=autoReturnChanged)
+    auto_return = Property(bool, getAutoReturn, setAutoReturn, notify=autoReturnChanged)
     modem_protocol = Property(
         str, getModemProtocol, setModemProtocol, notify=modemProtocolChanged
     )
-    hex_output = Property(int, getHexOutput, setHexOutput, notify=hexOutputChanged)
-    log_to_file = Property(int, getLogToFile, setLogToFile, notify=logToFileChanged)
+    hex_output = Property(bool, getHexOutput, setHexOutput, notify=hexOutputChanged)
+    log_to_file = Property(bool, getLogToFile, setLogToFile, notify=logToFileChanged)
     baudrate = Property(int, getBaudrate, setBaudrate, notify=baudrateChanged)
     data_bits = Property(int, getDataBits, setDataBits, notify=dataBitsChanged)
     flow_ctrl = Property(int, getFlowControl, setFlowControl, notify=flowControlChanged)
     stop_bits = Property(int, getStopBits, setStopBits, notify=stopBitsChanged)
     parity = Property(int, getParity, setParity, notify=parityChanged)
     open_mode = Property(int, getOpenMode, setOpenMode, notify=openModeChanged)
-    logfile_append_mode = Property(int, getLogfileAppendMode, setLogfileAppendMode, notify=logfileAppendModeChanged)
+    logfile_append_mode = Property(
+        bool, getLogfileAppendMode, setLogfileAppendMode, notify=logfileAppendModeChanged
+    )
+    display_ctrl_chars = Property(
+        bool, getDisplayCtrlChars, setDisplayCtrlChars, notify=displayCtrlCharsChanged
+    )
+    show_timestamp = Property(
+        bool, getShowTimestamp, setShowTimestamp, notify=showTimestampChanged
+    )
+    logfile = Property(
+        str, getLogfile, setLogfile, notify=logfileChanged
+    )
 
 
 class SerialManagerWidget(QWidget):
@@ -818,7 +898,9 @@ class SerialManagerWidget(QWidget):
             self.port.setDataBits(QSerialPort.DataBits(self.state.getDataBits()))
             self.port.setParity(QSerialPort.Parity(self.state.getParity()))
             self.port.setStopBits(QSerialPort.StopBits(self.state.getStopBits()))
-            self.port.setFlowControl(QSerialPort.FlowControl(self.state.getFlowControl()))
+            self.port.setFlowControl(
+                QSerialPort.FlowControl(self.state.getFlowControl())
+            )
 
             # 3. Attempt to open the port
             # if self.port.open(QIODevice.OpenModeFlag.ReadWrite):
@@ -853,43 +935,33 @@ class SerialManagerWidget(QWidget):
 
 
 class SelectLogFileWidget(QWidget):
-    logfile_changed = Signal(str)
 
     def __init__(self, state: AppState, parent=None):
         super().__init__(parent)
         self.state = state
 
-        self._logfile = QLineEdit(self)
-        self._logfile.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self._get_logfile = QPushButton("...")
-        self._get_logfile.setFixedWidth(32)
-
+        self.logfile = QLineEdit(self)
         self.logfile_append_mode = QCheckBox("Append")
 
+
+        self.logfile.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.get_logfile = QPushButton("...")
+        self.get_logfile.setFixedWidth(32)
+
+        self.logfile.setText(self.state.getLogfile())
         self.logfile_append_mode.setChecked(self.state.getLogfileAppendMode())
 
+        self.logfile.textChanged.connect(self.state.setLogfile)
         self.logfile_append_mode.toggled.connect(self.state.setLogfileAppendMode)
 
         self.lt = QHBoxLayout(self)
         self.lt.setContentsMargins(0, 0, 0, 0)
         self.lt.addWidget(QLabel("Logfile:"))
-        self.lt.addWidget(self._logfile)
-        self.lt.addWidget(self._get_logfile)
+        self.lt.addWidget(self.logfile)
+        self.lt.addWidget(self.get_logfile)
         self.lt.addWidget(self.logfile_append_mode)
 
-        self._get_logfile.clicked.connect(self.on_get_log_file)
-        self._logfile.textChanged.connect(self.logfile_changed.emit)
-
-        initial_log_path = _DEFAULTS.get("Logfile")
-        self._logfile.setText(initial_log_path)
-
-    @property
-    def logfile(self) -> tuple[str, str]:
-        return self._logfile.text()
-
-    @logfile.setter
-    def logfile(self, text):
-        self._logfile.setText(text)
+        self.get_logfile.clicked.connect(self.on_get_log_file)
 
     def on_get_log_file(self):
         file_dialog = QFileDialog(self, "Save log file ...")
@@ -903,12 +975,10 @@ class SelectLogFileWidget(QWidget):
         if result == QFileDialog.Accepted:
             files = file_dialog.selectedFiles()
             if files and len(files):
-                self._logfile.setText(files[0])
+                self.logfile.setText(files[0])
 
 
 class SettingsWidget(QWidget):
-    logfile_changed = Signal(str)
-    display_ctrl_chars_changed = Signal(object)
 
     def __init__(self, state: AppState, parent=None):
         super().__init__(parent)
@@ -920,10 +990,14 @@ class SettingsWidget(QWidget):
         self.stop_bits = QComboBox(self)
         self.parity = QComboBox(self)
         self.open_mode = QComboBox(self)
+        self.display_ctrl_chars = QCheckBox("Display Ctrl Characters")
+        self.show_timestamp = QCheckBox("Show Timestamp")
 
         self.baudrate.setEditable(True)
         baud_validator = QIntValidator(0, 10000000, self)
         self.baudrate.lineEdit().setValidator(baud_validator)
+
+        self.show_timestamp.setDisabled(True)
 
         self.baudrate.addItems(
             [str(v.value) for v in QSerialPort.BaudRate.__members__.values()]
@@ -959,9 +1033,7 @@ class SettingsWidget(QWidget):
 
         self.baudrate.setCurrentText(str(self.state.getBaudrate()))
         self.data_bits.setCurrentIndex(
-            self.data_bits.findData(
-                QSerialPort.DataBits(self.state.getDataBits())
-            )
+            self.data_bits.findData(QSerialPort.DataBits(self.state.getDataBits()))
         )
         self.flow_ctrl.setCurrentIndex(
             self.flow_ctrl.findData(
@@ -969,20 +1041,16 @@ class SettingsWidget(QWidget):
             )
         )
         self.stop_bits.setCurrentIndex(
-            self.stop_bits.findData(
-                QSerialPort.StopBits(self.state.getStopBits())
-            )
+            self.stop_bits.findData(QSerialPort.StopBits(self.state.getStopBits()))
         )
         self.parity.setCurrentIndex(
-            self.parity.findData(
-                QSerialPort.Parity(self.state.getParity())
-            )
+            self.parity.findData(QSerialPort.Parity(self.state.getParity()))
         )
         self.open_mode.setCurrentIndex(
-            self.open_mode.findData(
-                QSerialPort.OpenModeFlag(self.state.getOpenMode())
-            )
+            self.open_mode.findData(QSerialPort.OpenModeFlag(self.state.getOpenMode()))
         )
+        self.display_ctrl_chars.setChecked(self.state.getDisplayCtrlChars())
+        self.show_timestamp.setChecked(self.state.getShowTimestamp())
 
         self.baudrate.currentTextChanged.connect(
             lambda v: self.state.setBaudrate(int(v))
@@ -1002,13 +1070,10 @@ class SettingsWidget(QWidget):
         self.open_mode.currentIndexChanged.connect(
             lambda v: self.state.setOpenMode(self.open_mode.currentData().value)
         )
+        self.display_ctrl_chars.toggled.connect(self.state.setDisplayCtrlChars)
+        self.show_timestamp.toggled.connect(self.state.setShowTimestamp)
 
-        self._display_ctrl_chars = QCheckBox("Display Ctrl Characters")
-
-        self._show_timestamp = QCheckBox("Show Timestamp")
-        self._show_timestamp.setDisabled(True)
-
-        self._logfile = SelectLogFileWidget(state, self)
+        self.logfile = SelectLogFileWidget(state, self)
 
         self.grid = QGridLayout()
         self.grid.setAlignment(Qt.AlignmentFlag.AlignLeft)
@@ -1018,20 +1083,20 @@ class SettingsWidget(QWidget):
         self.grid.addWidget(QLabel("Data Bits"), 0, 2)
         self.grid.addWidget(self.data_bits, 0, 3)
 
-        self.grid.addWidget(self._display_ctrl_chars, 0, 4)
+        self.grid.addWidget(self.display_ctrl_chars, 0, 4)
 
         self.grid.addWidget(QLabel("Flow Control"), 1, 0)
         self.grid.addWidget(self.flow_ctrl, 1, 1)
         self.grid.addWidget(QLabel("Parity"), 1, 2)
         self.grid.addWidget(self.parity, 1, 3)
 
-        self.grid.addWidget(self._show_timestamp, 1, 4)
+        self.grid.addWidget(self.show_timestamp, 1, 4)
 
         self.grid.addWidget(QLabel("Open Mode"), 2, 0)
         self.grid.addWidget(self.open_mode, 2, 1)
         self.grid.addWidget(QLabel("Stop Bits"), 2, 2)
         self.grid.addWidget(self.stop_bits, 2, 3)
-        self.grid.addWidget(self._logfile, 2, 4, 1, 2)
+        self.grid.addWidget(self.logfile, 2, 4, 1, 2)
 
         self.vlt = QVBoxLayout(self)
         self.vlt.setContentsMargins(0, 0, 0, 0)
@@ -1039,37 +1104,8 @@ class SettingsWidget(QWidget):
         self.vlt.addWidget(HLineWidget(self))
         self.setVisible(False)
 
-        self._logfile.logfile_changed.connect(self.logfile_changed.emit)
-        self._display_ctrl_chars.checkStateChanged.connect(
-            self.display_ctrl_chars_changed.emit
-        )
-
     def toggle(self):
         self.setVisible(not self.isVisible())
-
-    @property
-    def display_ctrl_chars(self):
-        return self._display_ctrl_chars.isChecked()
-
-    @display_ctrl_chars.setter
-    def display_ctrl_chars(self, value):
-        self._display_ctrl_chars.setChecked(value)
-
-    @property
-    def show_timestamp(self):
-        return self._show_timestamp.isChecked()
-
-    @show_timestamp.setter
-    def show_timestamp(self, value):
-        self._show_timestamp.setChecked(value)
-
-    @property
-    def logfile(self):
-        return self._logfile.logfile
-
-    @logfile.setter
-    def logfile(self, text):
-        self._logfile.logfile = text
 
 
 class TerminalInput(QLineEdit):
@@ -1231,8 +1267,6 @@ class OutputViewWidget(QWidget):
         super().__init__(parent)
         self.state = state
 
-        self.display_ctrl_chars = False
-
         self.text_view = QPlainTextEdit(self)
         self.text_view.setReadOnly(True)
 
@@ -1246,34 +1280,25 @@ class OutputViewWidget(QWidget):
         self.hex_output.toggled.connect(self.state.setHexOutput)
         self.log_to_file.toggled.connect(self.state.setLogToFile)
 
-        self._clear_button = QPushButton("Clear")
-        self._logfile = QLabel("")
+        self.clear_button = QPushButton("Clear")
+        self.logfile = QLabel("")
+
+        self.state.logfileChanged.connect(self.logfile.setText)
 
         self.hlt = QHBoxLayout()
         self.hlt.setContentsMargins(0, 0, 0, 0)
         self.hlt.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        self.hlt.addWidget(self._clear_button)
+        self.hlt.addWidget(self.clear_button)
         self.hlt.addWidget(self.hex_output)
         self.hlt.addWidget(self.log_to_file)
-        self.hlt.addWidget(self._logfile)
+        self.hlt.addWidget(self.logfile)
 
         self.vlt = QVBoxLayout(self)
         self.vlt.setContentsMargins(0, 0, 0, 0)
         self.vlt.addWidget(self.text_view)
         self.vlt.addLayout(self.hlt)
 
-        self._clear_button.clicked.connect(self.text_view.clear)
-
-    @property
-    def logfile(self):
-        return self._logfile.text()
-
-    @logfile.setter
-    def logfile(self, value):
-        self._logfile.setText(value)
-
-    def steLogFile(self, value):
-        self.logfile = value
+        self.clear_button.clicked.connect(self.text_view.clear)
 
     def insertPlainBytesOrStr(
         self, data: bytes | str, prefix: str = "", suffix: str = ""
@@ -1288,7 +1313,7 @@ class OutputViewWidget(QWidget):
             output_string = decode_with_hex_fallback(
                 data,
                 hex_output=self.state.getHexOutput(),
-                display_ctrl_chars=self.display_ctrl_chars,
+                display_ctrl_chars=self.state.getDisplayCtrlChars(),
             )
 
         else:
@@ -1310,9 +1335,6 @@ class OutputViewWidget(QWidget):
                 "`insertToLogfile` not yet implemented, disable `Logging to:`",
             )
             raise NotImplementedError
-
-    def setShowCtrlChars(self, enabled: int = 0):
-        self.display_ctrl_chars = enabled == Qt.CheckState.Checked
 
     def _insert_colored_text(self, text: str, color: QColor | None):
         cursor = self.text_view.textCursor()
@@ -1398,9 +1420,6 @@ class CentralWidget(QWidget):
         self.input_history = InputHistory(self)
         self.output_view = OutputViewWidget(state, self)
         self.output_view.logfile = self.serial_manager.settings.logfile
-        self.output_view.setShowCtrlChars(
-            self.serial_manager.settings.display_ctrl_chars
-        )
 
         self.input_widget = InputWidget(self.state, self)
 
@@ -1426,12 +1445,6 @@ class CentralWidget(QWidget):
         self.serial_manager.data_received.connect(self.on_data_received)
         self.serial_manager.connection_state_changed.connect(
             self.on_connection_state_changed
-        )
-        self.serial_manager.settings.logfile_changed.connect(
-            self.output_view.steLogFile
-        )
-        self.serial_manager.settings.display_ctrl_chars_changed.connect(
-            self.output_view.setShowCtrlChars
         )
 
         self.input_widget.send_clicked.connect(self.on_send_clicked)
@@ -1607,41 +1620,8 @@ class YModTermWindow(QMainWindow):
         central_widget = CentralWidget(self.state)
         self.setCentralWidget(central_widget)
 
-        self.restore_settings()
-
-    def restore_settings(self):
-        central_widget: CentralWidget = self.centralWidget()
-
-        # Settings
-        settings_w: SettingsWidget = central_widget.serial_manager.settings
-        settings_w.display_ctrl_chars = self.settings.value(
-            "DisplayCtrlChars", _DEFAULTS.get("DisplayCtrlChars", False), bool
-        )
-        settings_w.show_timestamp = self.settings.value(
-            "ShowTimeStamp", _DEFAULTS.get("ShowTimeStamp", False), bool
-        )
-        settings_w.logfile = self.settings.value(
-            "Logfile", _DEFAULTS.get("Logfile", ""), str
-        )
-        settings_w.log_file_append_mode = self.settings.value(
-            "LogfileAppendMode", _DEFAULTS.get("LogfileAppendMode", ""), bool
-        )
-
-    def save_settings(self):
-        central_widget: CentralWidget = self.centralWidget()
-
-        # Settings
-        settings_w: SettingsWidget = central_widget.serial_manager.settings
-        self.settings.setValue("DisplayCtrlChars", settings_w.display_ctrl_chars)
-        self.settings.setValue("ShowTimeStamp", settings_w.show_timestamp)
-        self.settings.setValue("Logfile", settings_w.logfile)
-
-        # Apply QSettings
-        self.settings.sync()
-
     def closeEvent(self, event):
         self.state.save_settings()
-        self.save_settings()
         super().closeEvent(event)
 
 
