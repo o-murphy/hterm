@@ -6,6 +6,7 @@ import time
 from enum import Enum
 
 from ymodem.Protocol import ProtocolType
+from ymodem.Socket import ModemSocket
 
 
 # Import necessary classes from qtpy
@@ -343,8 +344,6 @@ class ModemTransferManager(QObject):
 
     def _start_transfer(self):
         try:
-            from ymodem.Socket import ModemSocket
-
             self.modem = ModemSocket(
                 read=self.adapter.read,
                 write=self.adapter.write,
