@@ -186,6 +186,118 @@ _PARITY_ITEMS = {
 _BAUDRATE_ITEMS = [str(v.value) for v in QSerialPort.BaudRate.__members__.values()]
 
 
+class QModemSocket(ModemSocket):
+    def __init__(
+        self,
+        read,
+        write,
+        protocol_type=ProtocolType.YMODEM,
+        protocol_type_options=None,
+    ):
+        super().__init__(read, write, protocol_type, protocol_type_options)
+        self._canceled = False
+
+    def cancel(self):
+        """Sets the cancellation flag"""
+        self._canceled = True
+        logger.info("[MODEM] Transfer cancellation requested")
+
+    def _abort(self):
+        """Override _abort so it works even with cancel"""
+        logger.debug("[MODEM] Calling _abort")
+        return super()._abort()
+
+    def _read_and_wait(self, wait_chars, wait_time=1):
+        """
+        Reads data with a cancel check every 100 ms
+        """
+        start_time = time.perf_counter()
+
+        while not self._canceled:
+            elapsed = time.perf_counter() - start_time
+            if elapsed > wait_time:
+                return None
+
+            # Read with a short timeout for fast response to cancel
+            # read() has a timeout, so it won't be a spinlock
+            c = self.read(1, timeout=0.1)
+
+            if c and len(c) > 0:
+                byte_val = c[0] if isinstance(c, bytes) else ord(c)
+                if byte_val in wait_chars:
+                    return byte_val
+
+            # Let Qt handle the events
+            QCoreApplication.processEvents()
+
+        # If canceled - return None
+        logger.debug("[MODEM] _read_and_wait: canceled")
+        return None
+
+    def _write_and_wait(self, write_char, wait_chars, wait_time=1):
+        """
+        Writes data and waits for a response with a check on cancel
+        """
+        if self._canceled:
+            return None
+
+        self.write(write_char)
+        start_time = time.perf_counter()
+
+        while not self._canceled:
+            elapsed = time.perf_counter() - start_time
+            if elapsed > wait_time:
+                return None
+
+            # Read with a short timeout
+            c = self.read(1, timeout=0.1)
+
+            if c and len(c) > 0:
+                byte_val = c[0] if isinstance(c, bytes) else ord(c)
+                if byte_val in wait_chars:
+                    return byte_val
+
+            # Let Qt handle the events
+            QCoreApplication.processEvents()
+
+        logger.debug("[MODEM] _write_and_wait: canceled")
+        return None
+
+    def send(self, paths, callback=None):
+        """
+        Override send to check for cancel at the beginning
+        """
+        if self._canceled:
+            logger.info("[MODEM] Send aborted: already canceled")
+            return False
+
+        try:
+            return super().send(paths, callback)
+        except Exception as e:
+            if self._canceled:
+                logger.info("[MODEM] Send interrupted by cancellation")
+                self._abort()  # Sending CAN
+                return False
+            raise
+
+    def recv(self, save_directory, callback=None):
+        """
+        Override recv to check cancel
+        """
+        if self._canceled:
+            logger.info("[MODEM] Recv aborted: already canceled")
+            return False
+
+        try:
+            return super().recv(save_directory, callback)
+        except Exception as e:
+            if self._canceled:
+                logger.info("[MODEM] Recv interrupted by cancellation")
+                self._abort()  # Sending CAN
+                return False
+            raise
+
+
 class QSerialPortModemAdapter(QObject):
     """QSerialPort adapter fro  ymodem.ModemSocket via queue"""
 
@@ -266,16 +378,11 @@ class ModemTransferManager(QObject):
         super().__init__()
         self.serial_port = serial_port
         self.adapter = None
-        self.modem = None
+        self.modem = None  # Тепер це буде CustomModemSocket
         self._is_running = False
         self._is_cancelled = False
-        self._is_finishing = False  # ← Додаємо флаг для запобігання повторному виклику
+        self._is_finishing = False
 
-        self.timer = QTimer()
-        self.timer.timeout.connect(self._process_chunk)
-        self.timer.setInterval(0)
-
-        self._transfer_iterator = None
         self._files_to_send = []
         self._save_directory = ""
         self._protocol = None
@@ -291,7 +398,10 @@ class ModemTransferManager(QObject):
         else:
             logger.debug("Adapter is not initialized")
 
-    def send_files(self, files: List[str], protocol: int, options: List[str] = []):
+    def send_files(self, files: List[str], protocol: int, options: List[str] = None):
+        if options is None:
+            options = []
+
         if self._is_running:
             self.error.emit("Transfer already running")
             return
@@ -313,8 +423,11 @@ class ModemTransferManager(QObject):
         QTimer.singleShot(100, self._start_transfer)
 
     def receive_files(
-        self, save_directory: str, protocol: int, options: List[str] = []
+        self, save_directory: str, protocol: int, options: List[str] = None
     ):
+        if options is None:
+            options = []
+
         if self._is_running:
             self.error.emit("Transfer already running")
             return
@@ -341,24 +454,25 @@ class ModemTransferManager(QObject):
 
         self._is_cancelled = True
         logger.debug("[MODEM] Cancel requested")
+        self.log.emit("⚠ Canceling transfer...")
+
+        # Викликаємо cancel на CustomModemSocket
+        if self.modem:
+            self.modem.cancel()
 
     def _start_transfer(self):
         try:
-            self.modem = ModemSocket(
+            # Використовуємо CustomModemSocket замість ModemSocket
+            self.modem = QModemSocket(
                 read=self.adapter.read,
                 write=self.adapter.write,
                 protocol_type=self._protocol,
                 protocol_type_options=self._options,
-                packet_size=1024,
             )
-
-            self._last_progress = [0, "", 0, 0]
 
             def progress_callback(index: int, name: str, total: int, current: int):
                 if self._is_cancelled:
                     raise Exception("Transfer canceled by user")
-
-                self._last_progress = [index, name, total, current]
                 self.progress.emit((index, name, total, current))
                 QCoreApplication.processEvents()
 
@@ -371,60 +485,53 @@ class ModemTransferManager(QObject):
                     self._save_directory, callback=progress_callback
                 )
 
-            # Нормальне завершення
+            # Якщо був cancel - це не успіх
+            if self._is_cancelled:
+                success = False
+
             self._finish_transfer(success)
 
         except Exception as e:
             error_msg = str(e).lower()
 
-            # Якщо це скасування - не показуємо як помилку
             if "cancel" in error_msg:
                 logger.debug("[MODEM] Transfer canceled in exception handler")
                 self._finish_transfer(False)
             else:
-                # Справжня помилка
                 logger.error("[MODEM] Transfer error: %s", str(e))
                 self.error.emit(str(e))
                 self._finish_transfer(False)
 
     def _finish_transfer(self, success: bool):
-        # Захист від повторного виклику
         if self._is_finishing or not self._is_running:
-            logger.debug("[MODEM] _finish_transfer: already finishing or not running")
+            logger.debug("[MODEM] Transfer already finishing or not running")
             return
 
         self._is_finishing = True
         self._is_running = False
 
-        # Логування результату
         if success and not self._is_cancelled:
             self.log.emit("✓ Transfer complete success")
         elif self._is_cancelled:
             self.log.emit("⚠ Transfer canceled by user")
         else:
-            # Помилка - але не скасування
             if not self._is_cancelled:
                 self.log.emit("✗ Transfer failed")
 
-        # Очищення ресурсів
         if self.adapter:
             self.adapter.clear_queue()
             self.adapter = None
 
         self.modem = None
 
-        # Емітимо finished тільки якщо успішно або якщо була помилка (не скасування)
         final_success = success and not self._is_cancelled
         self.finished.emit(final_success)
 
         logger.debug(
-            "[MODEM] _finish_transfer completed: success=%s, cancelled=%s",
+            "[MODEM] Transfer finished: success=%s, cancelled=%s",
             success,
             self._is_cancelled,
         )
-
-    def _process_chunk(self):
-        pass
 
 
 class StatefullProp(QObject):
