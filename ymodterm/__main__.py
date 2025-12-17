@@ -202,100 +202,100 @@ class QModemSocket(ModemSocket):
         self._canceled = True
         logger.info("[MODEM] Transfer cancellation requested")
 
-    def _abort(self):
-        """Override _abort so it works even with cancel"""
-        logger.debug("[MODEM] Calling _abort")
-        return super()._abort()
+    # def _abort(self):
+    #     """Override _abort so it works even with cancel"""
+    #     logger.debug("[MODEM] Calling _abort")
+    #     return super()._abort()
 
-    def _read_and_wait(self, wait_chars, wait_time=1):
-        """
-        Reads data with a cancel check every 100 ms
-        """
-        start_time = time.perf_counter()
+    # def _read_and_wait(self, wait_chars, wait_time=1):
+    #     """
+    #     Reads data with a cancel check every 100 ms
+    #     """
+    #     start_time = time.perf_counter()
 
-        while not self._canceled:
-            elapsed = time.perf_counter() - start_time
-            if elapsed > wait_time:
-                return None
+    #     while not self._canceled:
+    #         elapsed = time.perf_counter() - start_time
+    #         if elapsed > wait_time:
+    #             return None
 
-            # Read with a short timeout for fast response to cancel
-            # read() has a timeout, so it won't be a spinlock
-            c = self.read(1, timeout=0.1)
+    #         # Read with a short timeout for fast response to cancel
+    #         # read() has a timeout, so it won't be a spinlock
+    #         c = self.read(1, timeout=0.1)
 
-            if c and len(c) > 0:
-                byte_val = c[0] if isinstance(c, bytes) else ord(c)
-                if byte_val in wait_chars:
-                    return byte_val
+    #         if c and len(c) > 0:
+    #             byte_val = c[0] if isinstance(c, bytes) else ord(c)
+    #             if byte_val in wait_chars:
+    #                 return byte_val
 
-            # Let Qt handle the events
-            QCoreApplication.processEvents()
+    #         # Let Qt handle the events
+    #         QCoreApplication.processEvents()
 
-        # If canceled - return None
-        logger.debug("[MODEM] _read_and_wait: canceled")
-        return None
+    #     # If canceled - return None
+    #     logger.debug("[MODEM] _read_and_wait: canceled")
+    #     return None
 
-    def _write_and_wait(self, write_char, wait_chars, wait_time=1):
-        """
-        Writes data and waits for a response with a check on cancel
-        """
-        if self._canceled:
-            return None
+    # def _write_and_wait(self, write_char, wait_chars, wait_time=1):
+    #     """
+    #     Writes data and waits for a response with a check on cancel
+    #     """
+    #     if self._canceled:
+    #         return None
 
-        self.write(write_char)
-        start_time = time.perf_counter()
+    #     self.write(write_char)
+    #     start_time = time.perf_counter()
 
-        while not self._canceled:
-            elapsed = time.perf_counter() - start_time
-            if elapsed > wait_time:
-                return None
+    #     while not self._canceled:
+    #         elapsed = time.perf_counter() - start_time
+    #         if elapsed > wait_time:
+    #             return None
 
-            # Read with a short timeout
-            c = self.read(1, timeout=0.1)
+    #         # Read with a short timeout
+    #         c = self.read(1, timeout=0.1)
 
-            if c and len(c) > 0:
-                byte_val = c[0] if isinstance(c, bytes) else ord(c)
-                if byte_val in wait_chars:
-                    return byte_val
+    #         if c and len(c) > 0:
+    #             byte_val = c[0] if isinstance(c, bytes) else ord(c)
+    #             if byte_val in wait_chars:
+    #                 return byte_val
 
-            # Let Qt handle the events
-            QCoreApplication.processEvents()
+    #         # Let Qt handle the events
+    #         QCoreApplication.processEvents()
 
-        logger.debug("[MODEM] _write_and_wait: canceled")
-        return None
+    #     logger.debug("[MODEM] _write_and_wait: canceled")
+    #     return None
 
-    def send(self, paths, callback=None):
-        """
-        Override send to check for cancel at the beginning
-        """
-        if self._canceled:
-            logger.info("[MODEM] Send aborted: already canceled")
-            return False
+    # def send(self, paths, callback=None):
+    #     """
+    #     Override send to check for cancel at the beginning
+    #     """
+    #     if self._canceled:
+    #         logger.info("[MODEM] Send aborted: already canceled")
+    #         return False
 
-        try:
-            return super().send(paths, callback)
-        except Exception as e:
-            if self._canceled:
-                logger.info("[MODEM] Send interrupted by cancellation")
-                self._abort()  # Sending CAN
-                return False
-            raise
+    #     try:
+    #         return super().send(paths, callback)
+    #     except Exception as e:
+    #         if self._canceled:
+    #             logger.info("[MODEM] Send interrupted by cancellation")
+    #             self._abort()  # Sending CAN
+    #             return False
+    #         raise
 
-    def recv(self, save_directory, callback=None):
-        """
-        Override recv to check cancel
-        """
-        if self._canceled:
-            logger.info("[MODEM] Recv aborted: already canceled")
-            return False
+    # def recv(self, save_directory, callback=None):
+    #     """
+    #     Override recv to check cancel
+    #     """
+    #     if self._canceled:
+    #         logger.info("[MODEM] Recv aborted: already canceled")
+    #         return False
 
-        try:
-            return super().recv(save_directory, callback)
-        except Exception as e:
-            if self._canceled:
-                logger.info("[MODEM] Recv interrupted by cancellation")
-                self._abort()  # Sending CAN
-                return False
-            raise
+    #     try:
+    #         return super().recv(save_directory, callback)
+    #     except Exception as e:
+    #         if self._canceled:
+    #             logger.info("[MODEM] Recv interrupted by cancellation")
+    #             self._abort()  # Sending CAN
+    #             return False
+    #         raise
 
 
 class QSerialPortModemAdapter(QObject):
@@ -393,6 +393,7 @@ class ModemTransferManager(QObject):
         return self._is_running
 
     def put_to_queue(self, data: bytes):
+        print(data)
         if self.adapter:
             self.adapter.read_queue.put(bytes(data))
         else:
@@ -456,13 +457,11 @@ class ModemTransferManager(QObject):
         logger.debug("[MODEM] Cancel requested")
         self.log.emit("⚠ Canceling transfer...")
 
-        # Викликаємо cancel на CustomModemSocket
         if self.modem:
             self.modem.cancel()
 
     def _start_transfer(self):
         try:
-            # Використовуємо CustomModemSocket замість ModemSocket
             self.modem = QModemSocket(
                 read=self.adapter.read,
                 write=self.adapter.write,
@@ -485,7 +484,6 @@ class ModemTransferManager(QObject):
                     self._save_directory, callback=progress_callback
                 )
 
-            # Якщо був cancel - це не успіх
             if self._is_cancelled:
                 success = False
 
@@ -1486,10 +1484,7 @@ class CentralWidget(QWidget):
         QMessageBox.warning(self, "Error", msg)
 
     def _on_transfer_log(self, log_msg: str):
-        logger.info("[MODEM] %s" % log_msg)
-
-    def _on_transfer_log(self, log_msg: str):
-        logger.info("[MODEM] %s" % log_msg)
+        logger.debug("[MODEM] %s" % log_msg)
 
 
 class YModTermWindow(QMainWindow):
