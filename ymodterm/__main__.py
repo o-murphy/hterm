@@ -156,7 +156,33 @@ _DEFAULTS = {
     "ShowTimeStamp": False,
     "Logfile": (Path("~").expanduser() / ".ymodterm.log").as_posix(),
     "LogfileAppendMode": False,
+    "SettingsIsVisible": False
 }
+
+_FLOW_CTRL_ITEMS = {
+    "None": QSerialPort.FlowControl.NoFlowControl,
+    "Hardware": QSerialPort.FlowControl.HardwareControl,
+    "Software": QSerialPort.FlowControl.SoftwareControl,
+}
+
+_STOP_BITS_ITEMS = {
+    "One Stop": QSerialPort.StopBits.OneStop,
+    "Two Stop": QSerialPort.StopBits.TwoStop,
+    "One and Half": QSerialPort.StopBits.OneAndHalfStop,
+}
+
+_OPEN_MODE_ITEMS = {
+    "Read Only": QSerialPort.OpenModeFlag.ReadOnly,
+    "WriteOnly": QSerialPort.OpenModeFlag.WriteOnly,
+    "Read/Write": QSerialPort.OpenModeFlag.ReadWrite,
+}
+
+_PARITY_ITEMS = {
+    str(v.name).replace("Parity", "").replace("No", "None"): v
+    for v in QSerialPort.Parity.__members__.values()
+}
+
+_BAUDRATE_ITEMS = [str(v.value) for v in QSerialPort.BaudRate.__members__.values()]
 
 
 class QSerialPortModemAdapter(QObject):
@@ -578,13 +604,11 @@ class SerialManagerWidget(QWidget):
 
     def _update_rts(self, state: int):
         if self.port and self.port.isOpen():
-            self.port.setRequestToSend(self.state.rts.get())
-        print(f"RTS: {'High' if state else 'Low'}")
+            self.port.setRequestToSend(state)
 
     def _update_dtr(self, state: int):
         if self.port and self.port.isOpen():
-            self.port.setDataTerminalReady(self.state.dtr.get())
-        print(f"DTR: {'High' if state else 'Low'}")
+            self.port.setDataTerminalReady(state)
 
     def _timer_refresh(self):
         if not self.port or not self.port.isOpen():
@@ -789,36 +813,21 @@ class SettingsWidget(QWidget):
 
         self.show_timestamp.setDisabled(True)
 
-        self.baudrate.addItems(
-            [str(v.value) for v in QSerialPort.BaudRate.__members__.values()]
-        )
+        self.baudrate.addItems(_BAUDRATE_ITEMS)
 
         for k, v in QSerialPort.DataBits.__members__.items():
             self.data_bits.addItem(str(v.value), v)
 
-        for k, v in {
-            "None": QSerialPort.FlowControl.NoFlowControl,
-            "Hardware": QSerialPort.FlowControl.HardwareControl,
-            "Software": QSerialPort.FlowControl.SoftwareControl,
-        }.items():
-            self.flow_ctrl.addItem(k.replace("Flow", ""), userData=v)
+        for k, v in _FLOW_CTRL_ITEMS.items():
+            self.flow_ctrl.addItem(k, userData=v)
 
-        for k, v in {
-            "One Stop": QSerialPort.StopBits.OneStop,
-            "Two Stop": QSerialPort.StopBits.TwoStop,
-            "One and Half": QSerialPort.StopBits.OneAndHalfStop,
-        }.items():
+        for k, v in _STOP_BITS_ITEMS.items():
             self.stop_bits.addItem(k, userData=v)
 
-        for k, v in QSerialPort.Parity.__members__.items():
-            _name = str(v.name).replace("Parity", "").replace("No", "None")
-            self.parity.addItem(_name, userData=v)
+        for k, v in _PARITY_ITEMS.items():
+            self.parity.addItem(k, userData=v)
 
-        for k, v in {
-            "Read Only": QSerialPort.OpenModeFlag.ReadOnly,
-            "WriteOnly": QSerialPort.OpenModeFlag.WriteOnly,
-            "Read/Write": QSerialPort.OpenModeFlag.ReadWrite,
-        }.items():
+        for k, v in _OPEN_MODE_ITEMS.items():
             self.open_mode.addItem(k, userData=v)
 
         self.display_ctrl_chars.bind(self.state.display_ctrl_chars)
@@ -862,6 +871,7 @@ class SettingsWidget(QWidget):
         self.vlt.setContentsMargins(0, 0, 0, 0)
         self.vlt.addLayout(self.grid)
         self.vlt.addWidget(HLineWidget(self))
+
         self.setVisible(False)
 
     def toggle(self):
@@ -885,7 +895,7 @@ class TerminalInput(QLineEdit):
             self.send_return.emit()
             return
 
-        # 2. Ctrl + A-Z (БЕЗ Alt)
+        # 2. Ctrl + A-Z (with no Alt)
         ctrl_only = (modifiers & Qt.KeyboardModifier.ControlModifier) and not (
             modifiers & Qt.KeyboardModifier.AltModifier
         )
@@ -910,7 +920,6 @@ class TerminalInput(QLineEdit):
         self._rebuild_char_map()
 
     def _insert_visual_char(self, actual_char: str, display_text: str):
-        """Вставляє символ з візуальним відображенням."""
         cursor_pos = self.cursorPosition()
         current_text = self.text()
 
