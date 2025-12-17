@@ -156,7 +156,7 @@ _DEFAULTS = {
     "ShowTimeStamp": False,
     "Logfile": (Path("~").expanduser() / ".ymodterm.log").as_posix(),
     "LogfileAppendMode": False,
-    "SettingsIsVisible": False
+    "SettingsIsVisible": False,
 }
 
 _FLOW_CTRL_ITEMS = {
@@ -255,11 +255,11 @@ class QSerialPortModemAdapter(QObject):
 
 
 class ModemTransferManager(QObject):
-    progress = Signal(object)  # (index, filename, total, current)
-    finished = Signal(bool)  # success
-    error = Signal(str)  # error message
-    log = Signal(str)  # log message
-    started = Signal()  # transfer started
+    progress = Signal(object)
+    finished = Signal(bool)
+    error = Signal(str)
+    log = Signal(str)
+    started = Signal()
 
     def __init__(self, serial_port: QSerialPort):
         super().__init__()
@@ -268,6 +268,7 @@ class ModemTransferManager(QObject):
         self.modem = None
         self._is_running = False
         self._is_cancelled = False
+        self._is_finishing = False  # ← Додаємо флаг для запобігання повторному виклику
 
         self.timer = QTimer()
         self.timer.timeout.connect(self._process_chunk)
@@ -278,7 +279,7 @@ class ModemTransferManager(QObject):
         self._save_directory = ""
         self._protocol = None
         self._options = []
-        self._mode = None  # 'send' or 'receive'
+        self._mode = None
 
     def is_running(self) -> bool:
         return self._is_running
@@ -287,7 +288,6 @@ class ModemTransferManager(QObject):
         if self.adapter:
             self.adapter.read_queue.put(bytes(data))
         else:
-            # raise RuntimeError("Adapter is not initialized")
             logger.debug("Adapter is not initialized")
 
     def send_files(self, files: List[str], protocol: int, options: List[str] = []):
@@ -301,8 +301,8 @@ class ModemTransferManager(QObject):
         self._mode = "send"
         self._is_cancelled = False
         self._is_running = True
+        self._is_finishing = False
 
-        # Init Adapter
         self.adapter = QSerialPortModemAdapter(self.serial_port)
         self.adapter.clear_queue()
 
@@ -324,8 +324,8 @@ class ModemTransferManager(QObject):
         self._mode = "receive"
         self._is_cancelled = False
         self._is_running = True
+        self._is_finishing = False
 
-        # Init Adapter
         self.adapter = QSerialPortModemAdapter(self.serial_port)
         self.adapter.clear_queue()
 
@@ -335,8 +335,11 @@ class ModemTransferManager(QObject):
         QTimer.singleShot(100, self._start_transfer)
 
     def cancel(self):
+        if not self._is_running or self._is_cancelled:
+            return
+
         self._is_cancelled = True
-        self.log.emit("Transfer canceling...")
+        logger.debug("[MODEM] Cancel requested")
 
     def _start_transfer(self):
         try:
@@ -350,15 +353,14 @@ class ModemTransferManager(QObject):
                 packet_size=1024,
             )
 
-            # Iterator for step by step processing
             self._last_progress = [0, "", 0, 0]
 
             def progress_callback(index: int, name: str, total: int, current: int):
                 if self._is_cancelled:
-                    raise Exception("Transfer canceled")
+                    raise Exception("Transfer canceled by user")
+
                 self._last_progress = [index, name, total, current]
                 self.progress.emit((index, name, total, current))
-                # Process Qt Events
                 QCoreApplication.processEvents()
 
             if self._mode == "send":
@@ -370,37 +372,59 @@ class ModemTransferManager(QObject):
                     self._save_directory, callback=progress_callback
                 )
 
-            # Finalization
+            # Нормальне завершення
             self._finish_transfer(success)
 
         except Exception as e:
-            if "canceled" in str(e).lower() or "cancel" in str(e).lower():
-                self.log.emit("⚠ Transfer canceled by user")
+            error_msg = str(e).lower()
+
+            # Якщо це скасування - не показуємо як помилку
+            if "cancel" in error_msg:
+                logger.debug("[MODEM] Transfer canceled in exception handler")
                 self._finish_transfer(False)
             else:
-                error_msg = f"Error: {str(e)}"
-                self.log.emit(error_msg)
-                self.error.emit(error_msg)
+                # Справжня помилка
+                logger.error("[MODEM] Transfer error: %s", str(e))
+                self.error.emit(str(e))
                 self._finish_transfer(False)
 
     def _finish_transfer(self, success: bool):
+        # Захист від повторного виклику
+        if self._is_finishing or not self._is_running:
+            logger.debug("[MODEM] _finish_transfer: already finishing or not running")
+            return
+
+        self._is_finishing = True
         self._is_running = False
 
+        # Логування результату
         if success and not self._is_cancelled:
             self.log.emit("✓ Transfer complete success")
         elif self._is_cancelled:
             self.log.emit("⚠ Transfer canceled by user")
         else:
-            self.log.emit("✗ Transfer error")
+            # Помилка - але не скасування
+            if not self._is_cancelled:
+                self.log.emit("✗ Transfer failed")
 
+        # Очищення ресурсів
         if self.adapter:
+            self.adapter.clear_queue()
             self.adapter = None
 
         self.modem = None
-        self.finished.emit(success and not self._is_cancelled)
+
+        # Емітимо finished тільки якщо успішно або якщо була помилка (не скасування)
+        final_success = success and not self._is_cancelled
+        self.finished.emit(final_success)
+
+        logger.debug(
+            "[MODEM] _finish_transfer completed: success=%s, cancelled=%s",
+            success,
+            self._is_cancelled,
+        )
 
     def _process_chunk(self):
-        # Chunk processing not used here
         pass
 
 
@@ -1181,6 +1205,7 @@ class CentralWidget(QWidget):
         # Worker for file send
         self.modem_manager = None
         self.progress_dialog = None
+        self._transfer_in_progress = False
 
         self.input_history = InputHistory(self)
         self.output_view = OutputViewWidget(state, self)
@@ -1263,14 +1288,15 @@ class CentralWidget(QWidget):
         self.serial_manager.write(data)
 
     def on_data_received(self, data: bytes):
+        if self._transfer_in_progress and self.modem_manager:
+            self.modem_manager.put_to_queue(data)
+        # TODO: Should I disable output during transaction?
         self.output_view.insertPlainBytesOrStr(data)
 
     def on_send_file_selected(self, send_data):
         file, protocol, options = send_data
 
         if not self.serial_manager.port or not self.serial_manager.port.isOpen():
-            from qtpy.QtWidgets import QMessageBox
-
             QMessageBox.warning(self, "Error", "Port is not opened!")
             return
 
@@ -1280,7 +1306,7 @@ class CentralWidget(QWidget):
         self.progress_dialog = QProgressDialog(
             "Prepare to transfer...", "Cancel", 0, 100, self
         )
-        self.progress_dialog.setFixedWidth(400)
+        self.progress_dialog.setMinimumWidth(400)
         self.progress_dialog.setWindowTitle(f"{protocol.name} Transfer")
         self.progress_dialog.setModal(True)
         self.progress_dialog.setMinimumDuration(0)
@@ -1300,9 +1326,7 @@ class CentralWidget(QWidget):
         self.modem_manager.send_files([file], protocol, options)
 
     def _on_transfer_progress(self, progress_: tuple[int, str, int, int]):
-        """Progress bar updates"""
-
-        index, filename, total, current = progress_
+        _, filename, total, current = progress_
 
         if not self.progress_dialog:
             return
@@ -1328,39 +1352,38 @@ class CentralWidget(QWidget):
             )
 
     def _on_transfer_started(self):
-        self.serial_manager.data_received.connect(self.modem_manager.put_to_queue)
-        # self.serial_manager.data_received.disconnect(self.on_data_received)
+        self._transfer_in_progress = True
+        logger.info("[MODEM] Starting file transfer...")
 
     def _on_transfer_finished(self, success: bool):
+        self._transfer_in_progress = False
+
         if self.progress_dialog:
             self.progress_dialog.close()
             self.progress_dialog = None
 
-        self.serial_manager.data_received.disconnect(self.modem_manager.put_to_queue)
         self.modem_manager = None
-        # self.serial_manager.data_received.connect(self.on_data_received)
 
         if success:
+            msg = "✓ File successfully transferred!"
+            logger.info("[MODEM] %s", msg)
             msg_box = QMessageBox(self)
             msg_box.setIcon(QMessageBox.Information)
             msg_box.setWindowTitle("Success")
-            msg_box.setText("✓ File successfully transfered!")
+            msg_box.setText(msg)
             msg_box.show()
-
             QTimer.singleShot(2000, msg_box.close)
-        else:
-            QMessageBox.warning(self, "Error", "✗ Error occured during file transfer")
 
     def _on_transfer_error(self, error_msg: str):
-        self.output_view.insertPlainBytesOrStr(
-            f"{error_msg}", prefix="\n[ERROR] ", suffix="\n"
-        )
-        self.modem_manager.cancel()
+        msg = "✗ Error occured during file transfer"
+        logger.error("[MODEM] %s: %s" % (msg, error_msg))
+        QMessageBox.warning(self, "Error", msg)
 
     def _on_transfer_log(self, log_msg: str):
-        self.output_view.insertPlainBytesOrStr(
-            f"{log_msg}", prefix="[YMODEM] ", suffix="\n"
-        )
+        logger.info("[MODEM] %s" % log_msg)
+
+    def _on_transfer_log(self, log_msg: str):
+        logger.info("[MODEM] %s" % log_msg)
 
 
 class YModTermWindow(QMainWindow):
