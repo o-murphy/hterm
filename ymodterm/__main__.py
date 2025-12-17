@@ -393,7 +393,6 @@ class ModemTransferManager(QObject):
         return self._is_running
 
     def put_to_queue(self, data: bytes):
-        print(data)
         if self.adapter:
             self.adapter.read_queue.put(bytes(data))
         else:
