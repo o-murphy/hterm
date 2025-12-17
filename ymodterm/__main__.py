@@ -262,7 +262,7 @@ class ModemTransferManager(QObject):
             self.adapter.read_queue.put(bytes(data))
         else:
             # raise RuntimeError("Adapter is not initialized")
-            print("Adapter is not initialized")
+            logger.debug("Adapter is not initialized")
 
     def send_files(self, files: List[str], protocol: int, options: List[str] = []):
         if self._is_running:
@@ -378,7 +378,7 @@ class ModemTransferManager(QObject):
         pass
 
 
-class StatefullProperty(QObject):
+class StatefullProp(QObject):
     changed = Signal(object)
 
     def __init__(self, initial_value, typ=object, /, parent=None, *, objectName=None):
@@ -395,7 +395,7 @@ class StatefullProperty(QObject):
         if self.value != value:
             self.value = value
             self.changed.emit(value)
-        print(self.objectName(), value)
+        logger.debug("Value changed: %s: %s" % (self.objectName(), value))
 
     def bind(
         self,
@@ -420,9 +420,9 @@ class StatefullProperty(QObject):
                 logger.debug("%s binded to %s with auto cast" % (self, change_signal))
 
 
-def prop_from_defaults(key: str) -> StatefullProperty:
+def prop_from_defaults(key: str) -> StatefullProp:
     value = _DEFAULTS[key]
-    return StatefullProperty(value, value.__class__, None, objectName=key)
+    return StatefullProp(value, value.__class__, None, objectName=key)
 
 
 class AppState(QObject):
@@ -449,7 +449,7 @@ class AppState(QObject):
         self.show_timestamp = prop_from_defaults("ShowTimeStamp")
         self.logfile = prop_from_defaults("Logfile")
 
-    def restore_property(self, prop: StatefullProperty):
+    def restore_property(self, prop: StatefullProp):
         prop_name = prop.objectName()
         fallback_value = _DEFAULTS.get(prop_name, prop.value)
         prop.set(self.settings.value(prop_name, fallback_value, prop.typ))
@@ -475,10 +475,10 @@ class AppState(QObject):
             self.restore_property(self.logfile)
 
         except EOFError as e:
-            print("EOFError", e)
+            logger.error("EOFError on restore_settings: %s" % e)
             self.save_settings()
 
-    def save_property(self, prop: StatefullProperty):
+    def save_property(self, prop: StatefullProp):
         self.settings.setValue(prop.objectName(), prop.get())
 
     def save_settings(self):
@@ -525,9 +525,9 @@ class SerialManagerWidget(QWidget):
 
         self.label = QLabel("Device:")
 
-        self.select = QComboBox(self)
-        self.select.setStyleSheet("combobox-popup: 0;")
-        self.select.setMaxVisibleItems(10)
+        self.select_port = QComboBox(self)
+        self.select_port.setStyleSheet("combobox-popup: 0;")
+        self.select_port.setMaxVisibleItems(10)
 
         self.connect_btn = QPushButton("Connect")
 
@@ -550,7 +550,7 @@ class SerialManagerWidget(QWidget):
         self.hlt.setContentsMargins(0, 0, 0, 0)
         self.hlt.addWidget(self.connect_btn)
         self.hlt.addWidget(self.label)
-        self.hlt.addWidget(self.select)
+        self.hlt.addWidget(self.select_port)
         self.hlt.addWidget(self.rts)
         self.hlt.addWidget(self.dtr)
         self.hlt.addWidget(self.auto_reconnect)
@@ -578,12 +578,12 @@ class SerialManagerWidget(QWidget):
 
     def _update_rts(self, state: int):
         if self.port and self.port.isOpen():
-            self.port.setRequestToSend(self.rts.isChecked())
+            self.port.setRequestToSend(self.state.rts.get())
         print(f"RTS: {'High' if state else 'Low'}")
 
     def _update_dtr(self, state: int):
         if self.port and self.port.isOpen():
-            self.port.setDataTerminalReady(self.dtr.isChecked())
+            self.port.setDataTerminalReady(self.state.dtr.get())
         print(f"DTR: {'High' if state else 'Low'}")
 
     def _timer_refresh(self):
@@ -592,34 +592,34 @@ class SerialManagerWidget(QWidget):
 
     def refresh(self):
         """Updates the list of available serial ports."""
-        current_port_text = self.select.currentText()
+        current_port_text = self.select_port.currentText()
 
         self.ports = {p.portName(): p for p in QSerialPortInfo.availablePorts()}
 
         # Check if was changed
         new_port_names = sorted(self.ports.keys())
         current_combo_items = [
-            self.select.itemText(i) for i in range(self.select.count())
+            self.select_port.itemText(i) for i in range(self.select_port.count())
         ]
 
         if new_port_names != current_combo_items:
-            self.select.clear()
-            self.select.addItems(new_port_names)  # Sort for better visual
+            self.select_port.clear()
+            self.select_port.addItems(new_port_names)  # Sort for better visual
 
             # Restore last selection
             if self.port and self.port.portName() in self.ports:
-                self.select.setCurrentText(self.port.portName())
+                self.select_port.setCurrentText(self.port.portName())
             elif current_port_text in self.ports:
-                self.select.setCurrentText(current_port_text)
+                self.select_port.setCurrentText(current_port_text)
             elif self.ports:
                 # Select the last port if the list is not empty
-                self.select.setCurrentIndex(len(self.ports) - 1)
+                self.select_port.setCurrentIndex(len(self.ports) - 1)
 
-        self.select.setStyleSheet("combobox-popup: 0;")
-        self.select.setMaxVisibleItems(10)
+        self.select_port.setStyleSheet("combobox-popup: 0;")
+        self.select_port.setMaxVisibleItems(10)
 
     def setConfigutrationEnabled(self, enabled: bool):
-        self.select.setEnabled(enabled)
+        self.select_port.setEnabled(enabled)
         self.settings_btn.setEnabled(enabled)
 
     def toggle_settings(self):
@@ -648,7 +648,7 @@ class SerialManagerWidget(QWidget):
         else:
             # === CONNECT Mode ===
 
-            port_name = self.select.currentText()
+            port_name = self.select_port.currentText()
 
             if not port_name or port_name not in self.ports:
                 QMessageBox.warning(self, "Error", "Please select a valid port.")
@@ -678,8 +678,8 @@ class SerialManagerWidget(QWidget):
                 self.refresh_timer.stop()
                 # >>>
 
-                self._update_rts(self.rts.isChecked())
-                self._update_dtr(self.dtr.isChecked())
+                self._update_rts(self.state.rts.get())
+                self._update_dtr(self.state.dtr.get())
 
                 # The readyRead signal can be connected here to read data!
                 self.port.readyRead.connect(self.on_ready_read)
@@ -736,7 +736,7 @@ class SelectLogFileWidget(QWidget):
         if result == QFileDialog.Accepted:
             files = file_dialog.selectedFiles()
             if files and len(files):
-                self.logfile.setText(files[0])
+                self.state.logfile.set(files[0])
 
 
 class EnumComboBox(QComboBox):
@@ -745,7 +745,7 @@ class EnumComboBox(QComboBox):
         self.prop = None
         self.enum = enum
 
-    def bind(self, prop: StatefullProperty):
+    def bind(self, prop: StatefullProp):
         self.prop = prop
         self.prop.bind(
             self._cast_from_prop, self.currentIndexChanged, self._cast_to_prop
@@ -763,7 +763,7 @@ class CheckBox(QCheckBox):
         super().__init__(text, parent)
         self.prop = None
 
-    def bind(self, prop: StatefullProperty):
+    def bind(self, prop: StatefullProp):
         self.prop = prop
         self.prop.bind(self.setChecked, self.toggled)
 
@@ -998,7 +998,7 @@ class InputWidget(QWidget):
             return
 
         options = []
-        match self.modem_protocol.currentText():
+        match self.state.modem_protocol.get():
             case "YModem":
                 protocol = ProtocolType.YMODEM
             case "YModem-G":
@@ -1060,7 +1060,7 @@ class OutputViewWidget(QWidget):
         self, data: bytes | str, prefix: str = "", suffix: str = ""
     ):
         if isinstance(data, str):
-            if self.state.getHexOutput():
+            if self.state.hex_output.get():
                 output_string = data.encode("utf-8").hex(" ").upper()
             else:
                 output_string = data
@@ -1068,8 +1068,8 @@ class OutputViewWidget(QWidget):
         elif isinstance(data, bytes):
             output_string = decode_with_hex_fallback(
                 data,
-                hex_output=self.state.getHexOutput(),
-                display_ctrl_chars=self.state.getDisplayCtrlChars(),
+                hex_output=self.state.hex_output.get(),
+                display_ctrl_chars=self.state.display_ctrl_chars.get(),
             )
 
         else:
@@ -1084,7 +1084,7 @@ class OutputViewWidget(QWidget):
         self.insertToLogfile(prepared_string)
 
     def insertToLogfile(self, string):
-        if self.state.getLogToFile():
+        if self.state.log_to_file.get():
             QMessageBox.warning(
                 self,
                 "Error",
@@ -1213,7 +1213,7 @@ class CentralWidget(QWidget):
         if stop_bits == 3:
             stop_bits = "1.5"
         text = "Device: {port}\tConnection: {baud} @ {bits}-{parity}-{stop}".format(
-            port=self.serial_manager.select.currentText(),
+            port=self.serial_manager.select_port.currentText(),
             baud=self.state.baudrate.get(),
             bits=self.state.data_bits.get(),
             parity=QSerialPort.Parity(self.state.parity.get()).name[0],
@@ -1302,7 +1302,6 @@ class CentralWidget(QWidget):
             progress = int((current / total) * 100)
             self.progress_dialog.setValue(progress)
 
-            # Форматуємо розмір
             def format_size(size):
                 for unit in ["B", "KB", "MB", "GB"]:
                     if size < 1024.0:
