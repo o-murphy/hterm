@@ -1508,7 +1508,7 @@ class YModTermWindow(QMainWindow):
         self.state.restore_settings()
 
         # 1. Configure the main window properties
-        self.setWindowTitle("YModTerm")
+        self.setWindowTitle(f"YModTerm - v{__version__}")
         self.setGeometry(100, 100, 600, 400)  # x, y, width, height
 
         # 2. Create a central widget and layout
