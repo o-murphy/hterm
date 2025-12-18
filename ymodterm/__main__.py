@@ -266,7 +266,7 @@ class QModemSocket(ModemSocket):
 
         try:
             return super().send(paths, callback)
-        except Exception as e:
+        except Exception:
             if self._canceled:
                 logger.info("[MODEM] Send interrupted by cancellation")
                 self._abort()  # Sending CAN
@@ -283,7 +283,7 @@ class QModemSocket(ModemSocket):
 
         try:
             return super().recv(save_directory, callback)
-        except Exception as e:
+        except Exception:
             if self._canceled:
                 logger.info("[MODEM] Recv interrupted by cancellation")
                 self._abort()  # Sending CAN
@@ -1508,7 +1508,7 @@ class YModTermWindow(QMainWindow):
         self.state.restore_settings()
 
         # 1. Configure the main window properties
-        self.setWindowTitle("YModTerm")
+        self.setWindowTitle(f"YModTerm - v{__version__}")
         self.setGeometry(100, 100, 600, 400)  # x, y, width, height
 
         # 2. Create a central widget and layout
