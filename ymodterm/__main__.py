@@ -1,14 +1,16 @@
+import sys
+import time
 import logging
-from typing import Optional, Union, List, Callable, Any
+import signal
+import argparse
+from enum import Enum
 from pathlib import Path
 from queue import Queue, Empty
-import time
-from enum import Enum
-from html import escape
+
+from typing import Optional, Union, List, Callable, Any
 
 from ymodem.Protocol import ProtocolType
 from ymodem.Socket import ModemSocket
-
 
 # Import necessary classes from qtpy
 from qtpy.QtWidgets import (
@@ -44,8 +46,7 @@ from qtpy.QtCore import (
 )
 from qtpy.QtSerialPort import QSerialPort, QSerialPortInfo
 
-
-logging.basicConfig(level=logging.DEBUG, format="%(message)s")
+from ymodterm import __version__
 
 logger = logging.getLogger("ymodterm")
 
@@ -86,54 +87,6 @@ CTRL_NAMES = {
     0x0D: "\\r",
     0x7F: "^?",
 }
-
-
-# def decode_with_hex_fallback(
-#     data: bytes,
-#     *,
-#     hex_output: bool = False,
-#     display_ctrl_chars: bool = False,
-# ) -> str:
-#     # 1️⃣ Hex mode
-#     if hex_output:
-#         return " ".join(f"{b:02X}" for b in data)
-
-#     out: list[str] = []
-#     i = 0
-
-#     while i < len(data):
-#         b = data[i]
-
-#         # ---------- ASCII (включно з control chars) ----------
-#         if b < 0x80:
-#             if b < 0x20 or b == 0x7F:
-#                 # control chars
-#                 if display_ctrl_chars:
-#                     out.append(CTRL_NAMES.get(b, f"\\x{b:02X}"))
-#                 else:
-#                     out.append(chr(b))  # ← ПЛЕЙН ТЕКСТ
-#             else:
-#                 out.append(chr(b))
-
-#             i += 1
-#             continue
-
-#         # ---------- UTF-8 ----------
-#         try:
-#             char = data[i:].decode("utf-8", errors="strict")
-#             out.append(char)
-#             break
-
-#         except UnicodeDecodeError as e:
-#             if e.start > 0:
-#                 out.append(data[i : i + e.start].decode("utf-8", errors="strict"))
-#                 i += e.start
-#             else:
-#                 # реально битий байт
-#                 out.append(f"<0x{b:02X}>")
-#                 i += 1
-
-#     return "".join(out)
 
 
 def decode_with_hex_fallback(
@@ -188,7 +141,7 @@ def decode_with_hex_fallback(
 
         # Спробуємо декодувати послідовність
         try:
-            char = data[i:i + seq_len].decode("utf-8", errors="strict")
+            char = data[i : i + seq_len].decode("utf-8", errors="strict")
             out.append(char)
             i += seq_len
         except UnicodeDecodeError:
@@ -197,6 +150,7 @@ def decode_with_hex_fallback(
             i += 1
 
     return "".join(out)
+
 
 _DEFAULTS = {
     "AutoReconnect": False,
@@ -249,6 +203,9 @@ _PARITY_ITEMS = {
 _BAUDRATE_ITEMS = [str(v.value) for v in QSerialPort.BaudRate.__members__.values()]
 
 
+_MODEM_PROTOCOL_LIST = ["YModem", "YModem-G", "XModem", "ZModem"]
+
+
 class QModemSocket(ModemSocket):
     def __init__(
         self,
@@ -269,11 +226,10 @@ class QModemSocket(ModemSocket):
         """Override _abort so it works even with cancel"""
         logger.debug("[MODEM] Calling _abort")
         return super()._abort()
-    
-    def _read_and_wait(self, 
-                        wait_chars: List[str],
-                        wait_time: int = 1
-                        ) -> Optional[str]:
+
+    def _read_and_wait(
+        self, wait_chars: List[str], wait_time: int = 1
+    ) -> Optional[str]:
         start_time = time.perf_counter()
         while True:
             if self._canceled:
@@ -284,12 +240,10 @@ class QModemSocket(ModemSocket):
             c = self.read(1)
             if c in wait_chars:
                 return c
-    
-    def _write_and_wait(self, 
-                        write_char: str, 
-                        wait_chars: List[str],
-                        wait_time: int = 1
-                        ) -> Optional[str]:
+
+    def _write_and_wait(
+        self, write_char: str, wait_chars: List[str], wait_time: int = 1
+    ) -> Optional[str]:
         start_time = time.perf_counter()
         self.write(write_char)
         while True:
@@ -301,7 +255,7 @@ class QModemSocket(ModemSocket):
             c = self.read(1)
             if c in wait_chars:
                 return c
-    
+
     def send(self, paths, callback=None):
         """
         Override send to check for cancel at the beginning
@@ -641,30 +595,41 @@ class AppState(QObject):
         self.show_timestamp = prop_from_defaults("ShowTimeStamp")
         self.logfile = prop_from_defaults("Logfile")
 
-    def restore_property(self, prop: StatefullProp):
-        prop_name = prop.objectName()
-        fallback_value = _DEFAULTS.get(prop_name, prop.value)
-        prop.set(self.settings.value(prop_name, fallback_value, prop.typ))
+        # on load only props
+        self.dev = None  # device path or COM port
+
+    def restore_property(self, prop: StatefullProp, override_value=None):
+        if override_value is not None:
+            prop.set(override_value)
+        else:
+            prop_name = prop.objectName()
+            initial_value = _DEFAULTS.get(prop_name, prop.value)
+            prop.set(self.settings.value(prop_name, initial_value, prop.typ))
 
     def restore_settings(self):
+        ns = parse_cli_args()
         try:
             self.restore_property(self.rts)
             self.restore_property(self.dtr)
             self.restore_property(self.auto_reconnect)
             self.restore_property(self.line_end)
             self.restore_property(self.auto_return)
-            self.restore_property(self.modem_protocol)
+            self.restore_property(self.modem_protocol, ns.modem)
             self.restore_property(self.hex_output)
             self.restore_property(self.log_to_file)
-            self.restore_property(self.baudrate)
-            self.restore_property(self.data_bits)
+            self.restore_property(
+                self.baudrate, str(ns.baudrate) if ns.baudrate else None
+            )
+            self.restore_property(self.data_bits, ns.databits)
             self.restore_property(self.flow_ctrl)
-            self.restore_property(self.stop_bits)
-            self.restore_property(self.parity)
+            self.restore_property(self.stop_bits, ns.stopbits)
+            self.restore_property(self.parity, ns.parity)
             self.restore_property(self.open_mode)
             self.restore_property(self.logfile_append_mode)
             self.restore_property(self.display_ctrl_chars)
             self.restore_property(self.logfile)
+
+            self.dev = ns.port
 
         except EOFError as e:
             logger.error("EOFError on restore_settings: %s" % e)
@@ -757,6 +722,13 @@ class SerialManagerWidget(QWidget):
         self.vlt.addLayout(self.hlt)
 
         self.refresh()
+
+        # load port from state
+        if self.state.dev:
+            index = self.select_port.findText(self.state.dev)
+            if index >= 0:
+                self.select_port.setCurrentIndex(index)
+
         self.connect_btn.clicked.connect(self.toggle_connect)
         self.settings_btn.clicked.connect(self.toggle_settings)
 
@@ -784,7 +756,7 @@ class SerialManagerWidget(QWidget):
         """Updates the list of available serial ports."""
         current_port_text = self.select_port.currentText()
 
-        self.ports = {p.portName(): p for p in QSerialPortInfo.availablePorts()}
+        self.ports = {p.systemLocation(): p for p in QSerialPortInfo.availablePorts()}
 
         # Check if was changed
         new_port_names = sorted(self.ports.keys())
@@ -922,7 +894,6 @@ class SelectLogFileWidget(QWidget):
             self.state.logfile_append_mode.get(),
         )
         result = file_dialog.exec_()
-        print(result)
         if result == QFileDialog.Accepted:
             files = file_dialog.selectedFiles()
             if files and len(files):
@@ -1117,7 +1088,7 @@ class InputWidget(QWidget):
         self.auto_return = CheckBox("Auto ⏎")
 
         self.modem_protocol = QComboBox(self)
-        self.modem_protocol.addItems(["YModem", "YModem-G", "XModem", "ZModem"])
+        self.modem_protocol.addItems(_MODEM_PROTOCOL_LIST)
 
         self.state.line_end.bind(
             self.line_end.setCurrentText, self.line_end.currentTextChanged
@@ -1550,13 +1521,74 @@ class YModTermWindow(QMainWindow):
         super().closeEvent(event)
 
 
-def main():
-    import sys
-    import signal
+def parse_cli_args():
+    class ParityAction(argparse.Action):
+        def __call__(self, parser, namespace, values, option_string=None):
+            values = values.upper()
+            for k, v in QSerialPort.Parity.__members__.items():
+                if k.startswith(values):
+                    setattr(namespace, self.dest, v.value)
+                    return
+            setattr(namespace, self.dest, values)
 
+    class StopBitsAction(argparse.Action):
+        mapping = {
+            "1": QSerialPort.StopBits.OneStop.value,
+            "2": QSerialPort.StopBits.TwoStop.value,
+            "1.5": QSerialPort.StopBits.OneAndHalfStop.value,
+        }
+
+        def __call__(self, parser, namespace, values, option_string=None):
+            setattr(namespace, self.dest, self.mapping[values])
+
+    parser = argparse.ArgumentParser("ymodterm")
+    parser.add_argument("-p", "--port", type=str, help="COM port")
+    parser.add_argument("-b", "--baudrate", type=int, help="Baudrate, default 115200")
+    parser.add_argument(
+        "-pr",
+        "--parity",
+        action=ParityAction,
+        choices=["N", "E", "O", "S", "M"],
+        help="Parity, default N",
+    )
+    parser.add_argument(
+        "-db",
+        "--databits",
+        type=int,
+        default=8,
+        choices=[5, 6, 7, 8],
+        help="Bytesize, default 8",
+    )
+    parser.add_argument(
+        "-sb",
+        "--stopbits",
+        action=StopBitsAction,
+        default="1",
+        choices=["1", "2", "1.5"],
+        help="Stopbits, default 1",
+    )
+    # parser.add_argument("-t", "--timeout", type=float, default=2, help="Serial timeout, default 2")
+    # parser.add_argument("-cs", "--chunk-size", type=int, default=1024, help="Chunk size, default 1024")
+    parser.add_argument(
+        "-m",
+        "--modem",
+        type=str,
+        choices=_MODEM_PROTOCOL_LIST,
+        help="Modem protocol type",
+    )
+    parser.add_argument("-d", "--debug", action="store_true", help="Enable debug")
+    parser.add_argument("-V", "--version", action="version", version=__version__)
+    
+    ns = parser.parse_args()
+    if ns.debug:
+        logging.basicConfig(level=logging.DEBUG, format="%(message)s")
+    return ns
+
+
+def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 
-    app = QApplication([])
+    app = QApplication(sys.argv)
     window = YModTermWindow()
     window.show()
 
