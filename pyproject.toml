@@ -52,4 +52,5 @@ fallback_version = "0.0.0.dev0"
 [dependency-groups]
 dev = [
     "ruff>=0.14.9",
+    "pre-commit>=2.21.0"
 ]
