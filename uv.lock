@@ -302,7 +302,6 @@ wheels = [
 name = "ymodterm"
 source = { editable = "." }
 dependencies = [
-    { name = "pyqt6" },
     { name = "pyside6" },
     { name = "qtpy" },
     { name = "ymodem" },
@@ -316,7 +315,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "pyqt6", specifier = ">=6.10.1" },
     { name = "pyside6", specifier = ">=6.10.1" },
     { name = "qtpy", specifier = ">=2.4.3" },
     { name = "ymodem", specifier = ">=1.5.3" },
